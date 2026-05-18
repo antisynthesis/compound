@@ -1,0 +1,120 @@
+import Foundation
+
+/// Typed prompt template with explicit parameters. Prompts are
+/// production code: versioned, testable, swappable.
+///
+/// A `PromptTemplate` pairs a body containing `{{name}}` placeholders
+/// with a declared parameter list and a version string. Substitution is
+/// deterministic and strict: missing required parameters throw,
+/// unknown placeholders throw, and unknown parameter names throw.
+public struct PromptTemplate: Sendable, Equatable, Hashable {
+    /// Stable template name.
+    public let name: String
+    /// Version string. Convention: semver-style or a content hash.
+    public let version: String
+    /// Template body containing `{{placeholder}}` substitutions.
+    public let body: String
+    /// Declared parameters; missing requireds cause render-time errors.
+    public let parameters: [Parameter]
+
+    /// Declared input to a ``PromptTemplate``.
+    public struct Parameter: Sendable, Equatable, Hashable {
+        /// Parameter name as it appears between `{{ }}`.
+        public let name: String
+        /// `true` if a value must be supplied at render time.
+        public let required: Bool
+        /// Default substituted when no value is provided.
+        public let defaultValue: String?
+        /// Human-readable description (for tooling and tests).
+        public let description: String?
+
+        /// Creates a parameter declaration.
+        public init(name: String, required: Bool = true, defaultValue: String? = nil, description: String? = nil) {
+            self.name = name
+            self.required = required
+            self.defaultValue = defaultValue
+            self.description = description
+        }
+    }
+
+    /// Creates a template.
+    public init(name: String, version: String, body: String, parameters: [Parameter] = []) {
+        self.name = name
+        self.version = version
+        self.body = body
+        self.parameters = parameters
+    }
+
+    /// Substitutes `values` into ``body``. Verifies every declared
+    /// required parameter has a value, no unknown keys are passed, and
+    /// every placeholder is substituted.
+    ///
+    /// - Throws: ``PromptError/missingParameter(name:template:)`` if a
+    ///   required parameter is omitted,
+    ///   ``PromptError/unknownParameter(name:template:)`` if `values`
+    ///   contains an undeclared key, or
+    ///   ``PromptError/unsubstitutedPlaceholder(placeholder:template:)``
+    ///   if a `{{...}}` token remains after substitution.
+    public func render(_ values: [String: String] = [:]) throws -> String {
+        var resolved: [String: String] = [:]
+        for param in parameters {
+            if let v = values[param.name] {
+                resolved[param.name] = v
+            } else if let d = param.defaultValue {
+                resolved[param.name] = d
+            } else if param.required {
+                throw PromptError.missingParameter(name: param.name, template: "\(name)@\(version)")
+            }
+        }
+        // Reject extra keys so a typo in a parameter name surfaces here, not
+        // by silently failing to substitute.
+        let declared = Set(parameters.map(\.name))
+        for key in values.keys where !declared.contains(key) {
+            throw PromptError.unknownParameter(name: key, template: "\(name)@\(version)")
+        }
+
+        // Substitute {{name}} placeholders. Verify no placeholders remain
+        // unsubstituted after the pass; an unknown placeholder is a template
+        // bug and surfaced as an error rather than silently leaked.
+        var rendered = body
+        for (k, v) in resolved {
+            rendered = rendered.replacingOccurrences(of: "{{\(k)}}", with: v)
+        }
+        if let leftover = Self.findUnsubstituted(rendered) {
+            throw PromptError.unsubstitutedPlaceholder(placeholder: leftover, template: "\(name)@\(version)")
+        }
+        return rendered
+    }
+
+    static func findUnsubstituted(_ text: String) -> String? {
+        guard let openRange = text.range(of: "{{") else { return nil }
+        let after = text[openRange.upperBound...]
+        guard let closeRange = after.range(of: "}}") else { return nil }
+        return String(after[..<closeRange.lowerBound])
+    }
+}
+
+/// Errors thrown by ``PromptTemplate`` and ``PromptRegistry``.
+public enum PromptError: Error, Equatable, CustomStringConvertible {
+    /// A required parameter had no caller-supplied value and no default.
+    case missingParameter(name: String, template: String)
+    /// `values` contained a key not declared in the template.
+    case unknownParameter(name: String, template: String)
+    /// A `{{...}}` token remained in the rendered output.
+    case unsubstitutedPlaceholder(placeholder: String, template: String)
+    /// Registry lookup failed: no template with this name.
+    case unknownTemplate(name: String)
+    /// Registry lookup failed: the named template exists but not at this version.
+    case unknownVersion(name: String, version: String)
+
+    /// Human-readable description for diagnostics.
+    public var description: String {
+        switch self {
+        case .missingParameter(let n, let t): return "missing parameter '\(n)' for template \(t)"
+        case .unknownParameter(let n, let t): return "unknown parameter '\(n)' for template \(t)"
+        case .unsubstitutedPlaceholder(let p, let t): return "unsubstituted placeholder '\(p)' in template \(t)"
+        case .unknownTemplate(let n): return "unknown template '\(n)'"
+        case .unknownVersion(let n, let v): return "unknown version '\(v)' of template '\(n)'"
+        }
+    }
+}
