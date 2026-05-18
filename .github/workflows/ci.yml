@@ -16,7 +16,7 @@ jobs:
     runs-on: macos-26
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Show toolchain
         run: |
@@ -29,5 +29,5 @@ jobs:
       - name: Build
         run: swift build -c debug
 
-      - name: Run test runner
-        run: swift run -c debug CompoundTestRunner
+      - name: Run tests
+        run: swift test -c debug
