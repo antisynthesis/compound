@@ -1,0 +1,248 @@
+import Foundation
+import FoundationModels
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
+
+/// Resolves a hostname to one or more IP literals so SSRF gates can be
+/// re-evaluated against the actual peer addresses (defeats DNS
+/// rebinding). The default is ``SystemHostResolver``; tests can inject
+/// a fake.
+public protocol HostResolver: Sendable {
+    /// Returns numeric IP strings for `host`.
+    func resolve(_ host: String) async throws -> [String]
+}
+
+/// Resolves hostnames via `getaddrinfo`. Returns numeric IPv4/IPv6
+/// strings on a detached task so the calling actor is not blocked.
+public struct SystemHostResolver: HostResolver {
+    /// Creates an instance.
+    public init() {}
+    /// Synchronously resolves `host` on a detached task.
+    public func resolve(_ host: String) async throws -> [String] {
+        try await Task.detached(priority: .userInitiated) {
+            try Self.resolveSync(host)
+        }.value
+    }
+
+    static func resolveSync(_ host: String) throws -> [String] {
+        var hints = addrinfo()
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = SOCK_STREAM
+        var res: UnsafeMutablePointer<addrinfo>?
+        let status = host.withCString { getaddrinfo($0, nil, &hints, &res) }
+        guard status == 0, let head = res else {
+            throw WebFetchError.dnsResolutionFailed(host)
+        }
+        defer { freeaddrinfo(head) }
+        var out: [String] = []
+        var p: UnsafeMutablePointer<addrinfo>? = head
+        while let cur = p {
+            var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let ok = getnameinfo(cur.pointee.ai_addr,
+                                 cur.pointee.ai_addrlen,
+                                 &buf, socklen_t(buf.count),
+                                 nil, socklen_t(0),
+                                 Int32(NI_NUMERICHOST))
+            if ok == 0 {
+                let bytes = buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+                out.append(String(decoding: bytes, as: UTF8.self))
+            }
+            p = cur.pointee.ai_next
+        }
+        return out
+    }
+}
+
+enum WebFetchError: Error {
+    case dnsResolutionFailed(String)
+}
+
+/// Fetches the body of an HTTPS URL and returns it as text. The tool is
+/// intentionally narrow — it performs a single GET request, refuses
+/// non-HTTPS schemes by default, and caps the response size. For richer
+/// behavior (POST, custom headers, response streaming) wrap this tool
+/// or use `URLSession` directly inside your own tool.
+///
+/// Pair this with ``URLSafetyVerifier`` at the `VerifiedTool` argument
+/// layer for an additional gate against SSRF — the tool's built-in
+/// allow/block lists are a backstop, not a substitute for the verifier.
+public struct WebFetchTool: Tool {
+    public typealias Output = String
+
+    public let name: String = "web_fetch"
+    public let description: String = "Fetch the text body of an HTTPS URL (capped at maxBytes)."
+    public let parameters: GenerationSchema
+    public let includesSchemaInInstructions: Bool = true
+
+    /// URL session used for the request.
+    public let session: URLSession
+    /// Per-request timeout.
+    public let timeout: TimeInterval
+    /// Maximum number of response bytes the tool will buffer.
+    public let maxBytes: Int
+    /// Allowed URL schemes (default `["https"]`).
+    public let allowedSchemes: Set<String>
+    /// Hostnames blocked at the tool layer in addition to the verifier.
+    public let blockedHosts: Set<String>
+    /// Resolver consulted to defeat DNS rebinding.
+    public let resolver: HostResolver
+
+    /// Creates a tool with the supplied gating policy.
+    public init(
+        session: URLSession = .shared,
+        timeout: TimeInterval = 15,
+        maxBytes: Int = 256 * 1024,
+        allowedSchemes: Set<String> = ["https"],
+        blockedHosts: Set<String> = URLSafetyVerifier.defaultBlockedHosts,
+        resolver: HostResolver = SystemHostResolver()
+    ) {
+        self.session = session
+        self.timeout = timeout
+        self.maxBytes = maxBytes
+        self.allowedSchemes = allowedSchemes
+        self.blockedHosts = blockedHosts
+        self.resolver = resolver
+        let schema = DynamicGenerationSchema(
+            name: "WebFetchArguments",
+            description: "Arguments for the web_fetch tool",
+            properties: [
+                .init(
+                    name: "url",
+                    description: "Fully qualified HTTPS URL to fetch.",
+                    schema: DynamicGenerationSchema(type: String.self)
+                )
+            ]
+        )
+        self.parameters = try! GenerationSchema(root: schema, dependencies: [])
+    }
+
+    /// Decoded arguments for ``WebFetchTool``.
+    public struct Arguments: ConvertibleFromGeneratedContent, Sendable {
+        /// Fully qualified URL to fetch.
+        public let url: String
+        /// Decodes `content`.
+        public init(_ content: GeneratedContent) throws {
+            self.url = try content.value(String.self, forProperty: "url")
+        }
+    }
+
+    /// Performs a single GET and returns the body text. SSRF gates are
+    /// enforced before the request and against the resolved peer
+    /// address. Errors are returned in-band as `"error: ..."` strings;
+    /// cancellation is re-thrown.
+    public func call(arguments: Arguments) async throws -> String {
+        guard let url = URL(string: arguments.url),
+              let scheme = url.scheme?.lowercased(),
+              let rawHost = url.host(percentEncoded: false) else {
+            return "error: invalid URL"
+        }
+        var host = rawHost.lowercased()
+        if host.hasSuffix(".") { host.removeLast() }
+        guard host.allSatisfy({ $0.isASCII }) else {
+            return "error: host contains non-ASCII characters"
+        }
+        if !allowedSchemes.contains(scheme) {
+            return "error: scheme '\(scheme)' not allowed"
+        }
+        if blockedHosts.contains(host) {
+            return "error: host '\(host)' is blocked"
+        }
+        if URLSafetyVerifier.looksLikeNonCanonicalIPLiteral(host) {
+            return "error: host '\(host)' is a non-canonical IP literal"
+        }
+        if URLSafetyVerifier.isPrivateNetworkHost(host) {
+            return "error: host '\(host)' is on a private network"
+        }
+
+        // Defeat DNS rebinding: resolve the hostname now and reject if any
+        // returned address is on the SSRF blocklist. Literal IPs short-circuit
+        // because resolution would just echo the input.
+        let resolved: [String]
+        if URLSafetyVerifier.parseIPv4(host) != nil || URLSafetyVerifier.parseIPv6(host) != nil {
+            resolved = [host]
+        } else {
+            do {
+                resolved = try await resolver.resolve(host)
+            } catch {
+                if error is CancellationError { throw error }
+                return "error: DNS resolution failed for '\(host)'"
+            }
+        }
+        if resolved.isEmpty {
+            return "error: DNS resolution returned no addresses for '\(host)'"
+        }
+        for ip in resolved {
+            let normalized = ip.split(separator: "%").first.map(String.init) ?? ip  // strip zone id
+            if URLSafetyVerifier.isPrivateNetworkHost(normalized) {
+                return "error: host '\(host)' resolves to private address '\(normalized)'"
+            }
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.setValue("text/plain, text/html, application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (byteStream, response) = try await session.bytes(for: request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                return "error: HTTP \(http.statusCode)"
+            }
+            var buffer = Data()
+            buffer.reserveCapacity(min(maxBytes, 64 * 1024))
+            var overflow = false
+            for try await byte in byteStream {
+                if buffer.count >= maxBytes {
+                    overflow = true
+                    break
+                }
+                buffer.append(byte)
+            }
+            if overflow {
+                // URLSession.AsyncBytes doesn't expose the task to cancel;
+                // breaking the loop drops the reference and the connection
+                // tears down. Truncate to a UTF-8 boundary so we don't return
+                // a half-encoded code point.
+                buffer = truncatedToUTF8Boundary(buffer)
+            }
+            return String(data: buffer, encoding: .utf8) ?? "error: response was not valid UTF-8"
+        } catch {
+            if error is CancellationError { throw error }
+            return "error: \(error.localizedDescription)"
+        }
+    }
+
+    /// Drop a trailing incomplete UTF-8 code point if the buffer was cut
+    /// mid-sequence. Look back at most three bytes for a lead.
+    private func truncatedToUTF8Boundary(_ data: Data) -> Data {
+        var d = data
+        let bytes = [UInt8](d)
+        var trailingContinuations = 0
+        while trailingContinuations < 3,
+              bytes.count - 1 - trailingContinuations >= 0 {
+            let byte = bytes[bytes.count - 1 - trailingContinuations]
+            if byte & 0b1100_0000 == 0b1000_0000 {
+                trailingContinuations += 1
+            } else {
+                break
+            }
+        }
+        let leadIndex = bytes.count - 1 - trailingContinuations
+        guard leadIndex >= 0 else { return d }
+        let lead = bytes[leadIndex]
+        let expected: Int
+        if lead & 0b1000_0000 == 0 { expected = 0 }
+        else if lead & 0b1110_0000 == 0b1100_0000 { expected = 1 }
+        else if lead & 0b1111_0000 == 0b1110_0000 { expected = 2 }
+        else if lead & 0b1111_1000 == 0b1111_0000 { expected = 3 }
+        else { expected = 0 }
+        if trailingContinuations < expected {
+            d.removeLast(trailingContinuations + 1)
+        }
+        return d
+    }
+}
