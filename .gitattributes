@@ -1,0 +1,14 @@
+* text=auto eol=lf
+
+*.swift text diff=swift
+*.md text
+*.yml text
+*.yaml text
+*.json text
+*.docc/**/*.md text
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
