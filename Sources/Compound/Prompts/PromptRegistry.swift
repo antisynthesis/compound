@@ -1,11 +1,13 @@
 import Foundation
 
-/// System of record for production prompts.
+/// The system of record for production prompts — because a prompt you can't
+/// name a version of is a prompt you can't trust, reproduce, or roll back.
 ///
 /// `PromptRegistry` holds every named template at every released
-/// version so an older version can be retrieved for A/B comparison,
-/// rollback, or replay against a fixed eval set. Templates are
-/// immutable once registered; updates land as new versions.
+/// version, so an older version stays reachable for A/B comparison,
+/// rollback, or replay against a fixed eval set. History is not optional.
+/// Templates are immutable once registered; updates land as new versions,
+/// never as edits in place.
 ///
 /// Each template has a *pinned* version that ``template(named:version:)``
 /// resolves to when no explicit version is requested.

@@ -1,8 +1,9 @@
 import Foundation
 
-/// One eval case: an input prompt plus a list of ``EvalPredicate`` that
-/// must all pass for the case to be green. Cases are inert data —
-/// ``EvalRunner`` is what executes them against a session.
+/// One refusal to ship on faith. A prompt plus a list of ``EvalPredicate``
+/// that must all pass for the case to count as green — because measuring
+/// beats trusting the vibe. Cases are inert data; ``EvalRunner`` is what
+/// drags them through a session and makes them prove it.
 public struct EvalCase: Sendable {
     /// Stable case identifier.
     public let id: String
@@ -35,7 +36,8 @@ public struct EvalCase: Sendable {
     }
 }
 
-/// Named collection of ``EvalCase``s.
+/// A named battery of ``EvalCase``s — the questions you commit to asking
+/// every build before you let yourself believe it works.
 public struct EvalSuite: Sendable {
     /// Suite name surfaced in ``EvalReport``.
     public let name: String

@@ -1,6 +1,7 @@
 import Foundation
 
-/// Scans model output for common PII patterns.
+/// Catches personal data before it escapes the device. Scans model output for
+/// common PII patterns.
 ///
 /// Credit-card matches are Luhn-validated to keep false positives
 /// down — random 16-digit strings rarely satisfy the checksum. Other

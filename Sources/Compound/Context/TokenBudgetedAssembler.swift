@@ -1,10 +1,12 @@
 import Foundation
 
-/// ``ContextAssembler`` wrapper that trims retrieved sources to fit a
-/// soft token budget. Sources are dropped lowest-score-first until the
-/// rendered prompt fits; dropped IDs are surfaced via a
+/// A ``ContextAssembler`` wrapper that refuses to drown the model in
+/// noise. More context is not more truth — past a point it is just where
+/// the right answer goes to get lost in the middle. This trims retrieved
+/// sources to a soft token budget, dropping lowest-score-first until the
+/// rendered prompt fits, and surfaces every dropped ID via a
 /// ``TraceEvent/info(runID:category:message:)`` event so operators see
-/// when retrieval was truncated.
+/// exactly what was cut and why.
 ///
 /// Sources with `nil` ``RetrievedSource/score`` are pinned to the back
 /// of the eviction queue and only dropped after every scored source has
@@ -26,9 +28,9 @@ public struct TokenBudgetedAssembler: ContextAssembler {
         self.charsPerToken = charsPerToken
     }
 
-    /// Delegates to ``base`` and then drops lowest-score sources until
-    /// the approximate rendered token count is at or below
-    /// ``maxPromptTokens``.
+    /// Delegates to ``base``, then sheds the weakest sources first until
+    /// the approximate rendered token count sits at or below
+    /// ``maxPromptTokens``. What survives is what earned its place.
     public func assemble(userPrompt: String, runContext: RunContext) async throws -> AssembledContext {
         let assembled = try await base.assemble(userPrompt: userPrompt, runContext: runContext)
         var sources = assembled.sources

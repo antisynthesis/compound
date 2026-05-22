@@ -3,7 +3,8 @@ import Foundation
 #if canImport(MetricKit) && (os(iOS) || os(macOS) || os(visionOS))
 import MetricKit
 
-/// Bridges Apple's MetricKit into the Compound observability story.
+/// The health of the app the run lives inside, on the books too. Bridges
+/// Apple's MetricKit into the Compound observability story.
 ///
 /// MetricKit delivers aggregated app-health payloads (launch time,
 /// hangs, CPU, memory, energy) on a daily cadence (or on-demand in

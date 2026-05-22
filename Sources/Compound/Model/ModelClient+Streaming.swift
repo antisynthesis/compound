@@ -1,13 +1,14 @@
 import Foundation
 import FoundationModels
 
-// Streaming counterpart to ModelClient.respond. Apple's LanguageModelSession
-// exposes a partial-response stream that yields the cumulative output as it
-// is generated; we adapt that into an AsyncThrowingStream<String> whose
-// elements are the delta chunks (the suffix added since the previous yield)
-// rather than the rolling whole, which is what most UIs want for token-level
-// updates. The full output is captured on completion and traced exactly as
-// the non-streaming path does.
+// The same liar, watched in real time. This is the streaming counterpart to
+// ModelClient.respond. Apple's LanguageModelSession exposes a partial-response
+// stream that yields the cumulative output as it is generated; we adapt that
+// into an AsyncThrowingStream<String> whose elements are the delta chunks (the
+// suffix added since the previous yield) rather than the rolling whole, which
+// is what most UIs want for token-level updates. The full output is captured
+// on completion and traced exactly as the non-streaming path does — the stream
+// is a courtesy, the record is not.
 
 extension ModelClient {
     /// Default upper bound on buffered streamed chunks before back-pressure

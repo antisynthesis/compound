@@ -1,6 +1,6 @@
 # Examples
 
-Runnable patterns demonstrating Compound's typical wirings. Each example is a single `main.swift` file plus a brief README; none are part of the Compound library's build graph because they use the `@Generable` macro from `FoundationModels` or the `@Model` macro from `SwiftData`, both of which require compiler plugins that ship only with full Xcode (not with the CommandLineTools toolchain CI uses).
+Not toys. Each of these is a specific reality where handing a model the raw controls would be a beautiful, expensive mistake — and the wiring that refuses to do that. Each example is a single `main.swift` file plus a brief README; none are part of the Compound library's build graph because they use the `@Generable` macro from `FoundationModels` or the `@Model` macro from `SwiftData`, both of which require compiler plugins that ship only with full Xcode (not with the CommandLineTools toolchain CI uses).
 
 To run an example, open this package in Xcode 26 on a device or simulator with Apple Intelligence enabled and add the example as a target.
 

@@ -1,7 +1,9 @@
 import Foundation
 import FoundationModels
 
-/// Successful result of ``ControlLoop/run(prompt:modelClient:runContext:)``.
+/// What survives the loop. A result of ``ControlLoop/run(prompt:modelClient:runContext:)``
+/// that earned its place — every member of the chain looked at it and refused
+/// to object. Nothing reaches here on the model's word alone.
 public struct LoopOutcome: Sendable {
     /// Final model output that passed every chain member.
     public let output: String
@@ -11,14 +13,16 @@ public struct LoopOutcome: Sendable {
     public let runID: UUID
 }
 
-/// Orchestrates the propose-and-check loop. Asks a ``ModelResponding``
-/// for a response, gates it through the supplied output
-/// ``VerifierChain``, and on failure feeds the diagnostic into a repair
-/// turn — bounded by ``Budget`` on every dimension.
+/// The control loop. The model proposes; the system disposes. It asks a
+/// ``ModelResponding`` for a response, refuses to trust it, gates it
+/// through the supplied output ``VerifierChain``, and on failure feeds the
+/// diagnostic back as a repair turn — every dimension fenced by ``Budget``.
+/// This is propose→check→repair with a hard terminal state; there is no
+/// unbounded agent loop here, by design.
 ///
-/// The loop, not the model, decides what verifier runs and when to stop.
-/// A model that could skip verification provides much weaker guarantees
-/// than one whose outputs are gated unconditionally.
+/// The loop, not the model, decides what verifier runs and when to stop. A
+/// model that could skip its own verification is a model you are choosing
+/// to believe. We don't.
 ///
 /// # Example
 /// ```swift
@@ -51,9 +55,10 @@ public struct ControlLoop: Sendable {
         self.generationOptions = generationOptions
     }
 
-    /// Runs the propose-and-check loop until one of:
-    /// pass, reject, escalate, or budget exhausted. Honors task
-    /// cancellation between turns and around the model call.
+    /// Runs propose→check→repair until the loop reaches a terminal state —
+    /// pass, reject, escalate, or budget exhausted. There is always a wall;
+    /// the loop cannot run forever. Honors task cancellation between turns
+    /// and around the model call.
     ///
     /// - Parameters:
     ///   - prompt: The user prompt to start the loop with.

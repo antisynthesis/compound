@@ -1,11 +1,12 @@
 import Foundation
 
-/// Summarizes a run of an ``EvalSuite``.
+/// The ledger of a run of an ``EvalSuite`` — what passed, what failed, and
+/// what refused to even run.
 ///
-/// Each case has either a `completed` result (model produced an output
-/// and predicates were checked) or an `errored` result (the run itself
-/// threw — model unavailable, budget exhausted, etc.). Both are
-/// surfaced; the harness never swallows failures.
+/// Each case is either `completed` (the model produced an output and the
+/// predicates judged it) or `errored` (the run itself threw — model
+/// unavailable, budget exhausted, and so on). Both are surfaced in full.
+/// The harness never swallows a failure to make the number look kinder.
 public struct EvalReport: Sendable {
     /// Suite name (from ``EvalSuite/name``).
     public let suiteName: String
@@ -16,7 +17,8 @@ public struct EvalReport: Sendable {
     /// Per-case outcomes in evaluation order.
     public let cases: [CaseOutcome]
 
-    /// Outcome of evaluating a single ``EvalCase``.
+    /// The full record of what one ``EvalCase`` did when it was made to prove
+    /// itself — output, checks, errors, all of it, none of it sanded down.
     public struct CaseOutcome: Sendable {
         /// Identifier of the originating case.
         public let caseID: String
@@ -25,7 +27,9 @@ public struct EvalReport: Sendable {
         /// Outcome.
         public let result: Result
 
-        /// Either a completed case with predicate checks, or a run error.
+        /// Two honest endings and no third: the case completed and the
+        /// predicates judged it, or the run itself threw before it could
+        /// produce anything. A crash is not a pass.
         public enum Result: Sendable {
             /// The run produced `output`; `checks` are predicate outcomes.
             case completed(output: String, checks: [PredicateOutcome], elapsed: Duration)

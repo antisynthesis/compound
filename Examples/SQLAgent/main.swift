@@ -1,9 +1,11 @@
 // SQLAgent — natural-language to read-only SQL with structural gating.
 //
-// The pattern: the model proposes SQL, SQLSafetyVerifier gates it, and only
-// then is the query executed against your database. The verifier ensures
-// the agent cannot issue destructive statements (no DROP, no UPDATE without
-// WHERE, no multiple statements) regardless of what the model produces.
+// Letting a language model write SQL against a live database is exactly the
+// kind of easy idea that goes wrong in production. So the model never touches
+// the database directly. It proposes SQL; SQLSafetyVerifier disposes of
+// anything dangerous — no DROP, no UPDATE without a WHERE, no stacked
+// statements — and only the surviving query is executed. The guarantee comes
+// from the structure, not from trusting the model to behave.
 //
 // Open in Xcode 26 to run — the example demonstrates the wiring; for an
 // actual deployment plug your warehouse's executor into runQuery(_:).

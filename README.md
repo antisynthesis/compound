@@ -1,12 +1,14 @@
 # Compound
 
-**An Apple-first framework for building compound AI systems in Swift.**
+**A surgical instrument for building compound AI systems in Swift. Apple-first, on-device, no apologies.**
 
-Compound is a Swift package that builds the [Compound AI Systems][doc] pattern on top of Apple's on-device `FoundationModels`. It pairs a stochastic component (the model) with a constellation of deterministic components (verifiers, typed tools, structured retrieval, observability, governance) so the behavior you ship is governed by the deterministic layer, not by the model alone.
+The model is a beautiful liar. It is fluent, confident, and wrong on its own schedule. Every framework that hands you raw model output and calls it a product is selling you that lie wholesale. Compound refuses the sale.
+
+Compound builds the [Compound AI Systems][doc] pattern on top of Apple's on-device `FoundationModels`: a stochastic component (the model) wired to a constellation of deterministic components (verifiers, typed tools, structured retrieval, observability, governance). What you ship is governed by the part that does not hallucinate.
 
 The model proposes; the system disposes.
 
-No external LLM API is ever called. The stochastic core is Apple's on-device `SystemLanguageModel`, accessed through `FoundationModels`. That keeps privacy, latency, and cost properties under your control, and you avoid growing a dependency on a commercial frontier-model provider whose pricing is outside your reach.
+No external LLM API is ever called. There is no key to leak, no per-token meter ticking against you, no frontier-model vendor whose pricing and politics you do not control. The stochastic core is Apple's on-device `SystemLanguageModel`, reached through `FoundationModels`. Privacy, latency, and cost stay where they belong — under your hand. The tools that promised to solve your problem were too often built to harvest it. This one was not.
 
 [doc]: https://bair.berkeley.edu/blog/2024/02/18/compound-ai-systems/
 
@@ -64,7 +66,7 @@ let outcome = try await run.outcome.value
 
 ## Architecture
 
-Six layers, each one addressable on its own and replaceable independently. The control loop threads `RunContext` through all of them, so every layer sees the same trace IDs, budgets, policy, and cancellation token.
+Six layers. Not because six is elegant, but because the work has six genuine seams and pretending otherwise would be one of those abstractions that flatten the world into something easy to draw and impossible to trust. Each layer stands alone, each one is replaceable, none of them hides from you. The control loop threads `RunContext` through all of them, so every layer sees the same trace IDs, budgets, policy, and cancellation token. Nothing happens off the books.
 
 ```mermaid
 flowchart TD
@@ -162,7 +164,7 @@ Cancellation propagates. Cancelling the stream cancels the producer.
 
 ### Tool surface
 
-`VerifiedTool<Wrapped>` wraps any `FoundationModels.Tool` so every invocation is gated by:
+Letting a model reach into the world is the moment everything can go wrong. So nothing reaches through unguarded. `VerifiedTool<Wrapped>` wraps any `FoundationModels.Tool` so every invocation is gated by:
 
 1. A policy decision against the caller's `AuthContext`
 2. A chain of `Verifier`s run against the decoded arguments
@@ -172,9 +174,9 @@ Cancellation propagates. Cancelling the stream cancels the producer.
 
 ### Verifier kit
 
-`Verifier<Input>` is the deterministic disposer. The cost ladder (`parse < schema < types < lint < unitTest < integrationTest < proof < human`) drives `VerifierChain` ordering: cheapest first, short-circuit on the first non-pass.
+`Verifier<Input>` is where the model's confidence goes to be tested. It is the deterministic disposer, and the system's reliability is bounded by it — not by how persuasive the model sounded. The cost ladder (`parse < schema < types < lint < unitTest < integrationTest < proof < human`) drives `VerifierChain` ordering: ask the cheap, certain questions first, and stop the moment something fails. Doubt is not free, so you spend it carefully.
 
-Around 40 verifier types ship with the framework, totaling 100-plus built-in detection rules (the `SecretsVerifier` alone carries 21 default credential patterns; the path and shell deny lists carry dozens). They cover:
+Around 40 verifier types ship with the framework, totaling 100-plus built-in detection rules (the `SecretsVerifier` alone carries 21 default credential patterns; the path and shell deny lists carry dozens). These are not abstract "safety" gestures — each one was cut to a specific way real systems break. They cover:
 
 | Concern | Verifiers |
 |---|---|
@@ -200,7 +202,7 @@ Verifiers compose with `Verifier.contramap`, so a `Verifier<String>` is reusable
 
 ### Control loop
 
-`ControlLoop` runs propose-and-check until pass / reject / escalate / budget exhausted. `StreamingControlLoop` does the same but yields `ProgressEvent`s while running. Both respect `Task.cancel()`. `Budget` covers turns, tool calls, repair attempts, wall-clock, and output tokens.
+`ControlLoop` runs propose-and-check until pass / reject / escalate / budget exhausted. No unbounded "let the agent figure it out" loop that quietly burns your battery and your money until something catches fire — every run terminates, on purpose, against a budget you set. `StreamingControlLoop` does the same but yields `ProgressEvent`s while running. Both respect `Task.cancel()`. `Budget` covers turns, tool calls, repair attempts, wall-clock, and output tokens: the leash is short and it is in your hand.
 
 ### Observability and governance
 
@@ -235,7 +237,7 @@ Verifiers compose with `Verifier.contramap`, so a `Verifier<String>` is reusable
 
 ## Apple-platform integration
 
-Compound leans on Apple's on-device frameworks all the way through. Nothing leaves the device unless your app sends it somewhere.
+Compound leans on Apple's on-device frameworks all the way down. This is the whole point: the data stays on the device, in the user's hand, where it was generated. Nothing leaves unless your app makes the deliberate choice to send it. There is no telemetry you didn't write, no silent exfiltration, no third party reading over the user's shoulder.
 
 | Apple framework | Compound type |
 |---|---|
@@ -278,7 +280,7 @@ The suite is Swift Testing (`@Test`, `@Suite`, `#expect`). It runs from the comm
 
 ## Architecture Concepts & Research
 
-Compound is shaped by a fast-moving body of research on building production AI systems out of small, well-typed parts. If you want to know why a layer exists, the papers below are the source material. The shorthand: shift weight from the model to the surrounding system, then verify.
+None of this is improvised. Compound is shaped by a fast-moving body of research on building production AI systems out of small, well-typed parts — the actual topology of the problem, not a vibe. If you want to know why a layer exists, the papers below are the source material, not decoration. The shorthand: take the weight off the model, put it on the system around the model, then verify what's left.
 
 ### The shift from monolithic models to compound systems
 
@@ -347,7 +349,9 @@ Compound is shaped by a fast-moving body of research on building production AI s
 - Liu, Zhu, Gao, et al. **MobileLLM: Optimizing Sub-billion Parameter Language Models for On-Device Use Cases.** [arXiv:2402.14905](https://arxiv.org/abs/2402.14905)
 - Abdin, Aneja, Awadalla, et al. **Phi-3 Technical Report: A Highly Capable Language Model Locally on Your Phone.** [arXiv:2404.14219](https://arxiv.org/abs/2404.14219)
 
-Every layer in this codebase points back at one or more of these results. The anti-patterns the BAIR essay warns about (prompt-engineering as a substitute for verification, the model as its own verifier, unbounded agent loops) are guards Compound holds to.
+Every layer in this codebase points back at one or more of these results. The anti-patterns the BAIR essay warns about — prompt-engineering as a substitute for verification, the model grading its own homework, agent loops with no terminal state — are exactly the beautiful lies Compound was built to refuse. The hard things are not made easy here. They are made possible.
+
+Tools sharp enough to matter.
 
 ## License
 

@@ -1,9 +1,9 @@
 import Foundation
 
-/// Thing under evaluation: anything that takes a prompt and produces an
-/// output string. Typically a ``CompoundSession``, but factored as a
-/// protocol so tests, dry-runs, and CI replay against recorded outputs
-/// all work.
+/// Whatever is on trial: anything that takes a prompt and returns an output
+/// string. Usually a ``CompoundSession``, but kept behind a protocol on
+/// purpose — tests, dry-runs, and CI replay against recorded outputs all
+/// deserve to be measured the same way, with no special pleading.
 public protocol EvalTarget: Sendable {
     /// Runs the target against `prompt` and returns the final output.
     func respond(to prompt: String, auth: AuthContext, metadata: [String: String]) async throws -> String
@@ -23,8 +23,9 @@ extension CompoundSession: EvalTarget {
     }
 }
 
-/// Fake target backed by a prompt→output lookup table. Useful for
-/// deterministic eval runs in tests.
+/// A target with no model behind it — a prompt→output lookup table — so an
+/// eval run can be perfectly deterministic when the thing you're testing is
+/// the harness itself, not the model.
 public struct StubEvalTarget: EvalTarget {
     private let table: [String: String]
     /// Creates a stub over `table`.
@@ -35,8 +36,10 @@ public struct StubEvalTarget: EvalTarget {
     }
 }
 
-/// Executes an ``EvalSuite`` against an ``EvalTarget`` with bounded
-/// concurrency and produces an ``EvalReport``.
+/// The instrument that turns suspicion into evidence: it drives an
+/// ``EvalSuite`` against an ``EvalTarget`` under bounded concurrency and
+/// returns an ``EvalReport`` — a verdict you can read instead of a feeling
+/// you have to defend.
 public struct EvalRunner: Sendable {
     /// Maximum cases evaluated in parallel.
     public let concurrency: Int

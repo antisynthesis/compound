@@ -8,17 +8,20 @@ import Glibc
 import Musl
 #endif
 
-/// Resolves a hostname to one or more IP literals so SSRF gates can be
-/// re-evaluated against the actual peer addresses (defeats DNS
-/// rebinding). The default is ``SystemHostResolver``; tests can inject
-/// a fake.
+/// The thing that refuses to trust a name. It resolves a hostname to the
+/// IP literals it actually points at, so the SSRF gates can be re-run
+/// against the real peer address rather than the one the model was
+/// promised — this is what defeats DNS rebinding. The default is
+/// ``SystemHostResolver``; tests can inject a fake.
 public protocol HostResolver: Sendable {
     /// Returns numeric IP strings for `host`.
     func resolve(_ host: String) async throws -> [String]
 }
 
-/// Resolves hostnames via `getaddrinfo`. Returns numeric IPv4/IPv6
-/// strings on a detached task so the calling actor is not blocked.
+/// The real resolver, asking the system the same question the connection
+/// will. It resolves hostnames via `getaddrinfo` and returns numeric
+/// IPv4/IPv6 strings on a detached task so the calling actor never blocks
+/// on the network.
 public struct SystemHostResolver: HostResolver {
     /// Creates an instance.
     public init() {}
@@ -62,15 +65,19 @@ enum WebFetchError: Error {
     case dnsResolutionFailed(String)
 }
 
+/// The moment the model reaches off the device — and the place that
+/// refuses to let it talk the system into reaching somewhere it shouldn't.
 /// Fetches the body of an HTTPS URL and returns it as text. The tool is
-/// intentionally narrow — it performs a single GET request, refuses
-/// non-HTTPS schemes by default, and caps the response size. For richer
-/// behavior (POST, custom headers, response streaming) wrap this tool
-/// or use `URLSession` directly inside your own tool.
+/// deliberately narrow: a single GET, non-HTTPS schemes refused by default,
+/// the response size capped. Narrowness is the point; an instrument that
+/// can do everything can be turned against you. For richer behavior (POST,
+/// custom headers, response streaming) wrap this tool or reach for
+/// `URLSession` inside your own.
 ///
 /// Pair this with ``URLSafetyVerifier`` at the `VerifiedTool` argument
-/// layer for an additional gate against SSRF — the tool's built-in
-/// allow/block lists are a backstop, not a substitute for the verifier.
+/// layer for a second gate against SSRF — the tool's built-in allow/block
+/// lists are a backstop, never a substitute for the verifier. Defense lives
+/// in depth, not in any single check.
 public struct WebFetchTool: Tool {
     public typealias Output = String
 

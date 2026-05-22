@@ -1,9 +1,11 @@
 import Foundation
 import NaturalLanguage
 
-/// Requires that model output be in a specific language (or one of a
-/// set). Backed by `NLLanguageRecognizer`, which ships on every Apple
-/// platform.
+/// Holds the output to the language it was asked to speak. A model will
+/// drift into another tongue with the same fluent confidence it gets
+/// everything else; this refuses the drift. Backed by
+/// `NLLanguageRecognizer`, which ships on every Apple platform — the
+/// judgment stays on-device, never sent anywhere.
 ///
 /// The ``minimumConfidence`` threshold gates on the recognizer's
 /// probability — leaving it permissive (~0.5) catches outright

@@ -10,7 +10,10 @@ public enum SQLStatementKind: String, Sendable, Hashable, CaseIterable {
     case unknown
 }
 
-/// Pragmatic SQL safety gate for text-to-SQL agents.
+/// The gate between a model's fluent SQL and your production database.
+/// Text-to-SQL is a beautiful liar's favorite trick — a confident query
+/// that drops a table it was never meant to touch. This refuses to take
+/// the statement on faith.
 ///
 /// The internal tokenizer recognizes strings, identifiers, keywords,
 /// comments, and statement terminators well enough to classify each
@@ -114,8 +117,9 @@ public enum SQLParseError: Error, Equatable, CustomStringConvertible {
     }
 }
 
-/// SQL tokenizer used by ``SQLSafetyVerifier``. Public so callers can
-/// build their own verifiers on the same token stream.
+/// The tokenizer beneath ``SQLSafetyVerifier`` — small, exact, and built
+/// for one reality rather than the whole SQL standard. Public on purpose,
+/// so callers can sharpen their own verifiers on the same token stream.
 public enum SQLTokenizer {
     /// Tokenizes `input` into a stream of ``SQLToken`` values.
     public static func tokenize(_ input: String) throws -> [SQLToken] {

@@ -1,10 +1,12 @@
 import Foundation
 
-// Numeric invariants that don't fit cleanly inside JSONSchemaVerifier —
-// the model emits a single bare number, probabilities need a 0...1
-// bound, or line-items must sum to a declared total within a tolerance.
+// Numeric invariants that refuse to fold into JSONSchemaVerifier — the
+// model emits a single bare number, probabilities need a 0...1 bound, or
+// line-items must sum to a declared total within a tolerance. Arithmetic
+// is one place a confident lie has nowhere to hide; these hold it there.
 
-/// Validates that a `Double` falls within optional `min`/`max` bounds.
+/// Holds a `Double` inside optional `min`/`max` bounds. Numbers are where
+/// fluency runs out of room to bluff.
 public struct NumericRangeVerifier: Verifier {
     public typealias Input = Double
     public let name: String
@@ -48,7 +50,9 @@ public struct NumericRangeVerifier: Verifier {
     }
 }
 
-/// Validates that the value is a probability in `[0, 1]` and not `NaN`.
+/// Insists a probability actually be one: a value in `[0, 1]`, and not
+/// `NaN`. The model says "0.97 confidence" — this checks the number is
+/// even a number.
 public struct ProbabilityVerifier: Verifier {
     public typealias Input = Double
     public let name: String
@@ -110,8 +114,10 @@ public struct SumVerifier: Verifier {
     }
 }
 
-/// Reports whether successive values are monotonic in the requested
-/// direction. Useful for time-series, paging cursors, version numbers.
+/// Demands a sequence keep moving the way it claims to — monotonic in the
+/// requested direction. The instrument for time-series, paging cursors,
+/// and version numbers, where one value out of order is a quiet
+/// corruption the model will never confess to.
 public struct MonotonicVerifier<Value: Comparable & Sendable>: Verifier {
     public typealias Input = [Value]
     public let name: String

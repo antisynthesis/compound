@@ -1,13 +1,14 @@
 import Foundation
 
-// A small starter kit of pure-Swift verifiers. They are not exhaustive; their
-// purpose is to be useful out of the box and to model the shape that custom
-// verifiers should take. None of these depend on FoundationModels — they
-// operate on plain Swift values produced by the rest of the system.
+// A small starter kit of pure-Swift verifiers. Not a best-practices bundle
+// that pretends to anticipate your reality — a set of working examples meant to
+// be useful out of the box and to model the shape your own instruments should
+// take. None depend on FoundationModels; they operate on plain Swift values
+// produced by the rest of the system.
 
-/// Validates an input string against a regex. When `mustMatch` is
-/// `true` (the default) the pattern must match for the verifier to
-/// pass; when `false` the pattern must *not* match.
+/// Holds an input string to a regex and refuses anything that does not fit.
+/// When `mustMatch` is `true` (the default) the pattern must match for the
+/// verifier to pass; when `false` the pattern must *not* match.
 ///
 /// Marked `@unchecked Sendable` because `Regex<AnyRegexOutput>` is not
 /// formally `Sendable`; all stored fields are immutable.
@@ -42,8 +43,8 @@ public struct RegexVerifier: Verifier, @unchecked Sendable {
     }
 }
 
-/// Validates that an input string's character count falls within
-/// optional `min`/`max` bounds.
+/// Enforces that an input string's character count falls within optional
+/// `min`/`max` bounds — a blunt instrument, but exact about its edges.
 public struct LengthVerifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -73,7 +74,8 @@ public struct LengthVerifier: Verifier {
     }
 }
 
-/// Validates the input parses as JSON (fragments allowed). Use
+/// Confirms the input actually parses as JSON (fragments allowed) — the model
+/// claiming it returned JSON is not the same as it having done so. Use
 /// ``JSONSchemaVerifier`` when shape-level validation is required.
 public struct JSONParseVerifier: Verifier {
     public typealias Input = String
@@ -102,8 +104,9 @@ public struct JSONParseVerifier: Verifier {
     }
 }
 
-/// Generic verifier that delegates to a `Bool`-returning closure.
-/// Useful for inline checks and one-off cases.
+/// An instrument you grind on the spot. Delegates to a `Bool`-returning
+/// closure — for inline checks and the one-off realities no built-in
+/// anticipated.
 public struct PredicateVerifier<Input: Sendable>: Verifier {
     public let name: String
     public let cost: VerifierCost
@@ -132,9 +135,10 @@ public struct PredicateVerifier<Input: Sendable>: Verifier {
     }
 }
 
-/// Requires the model output to cite at least one of the known source
-/// IDs supplied at construction, and refuses citations of unknown IDs.
-/// Pair with ``DefaultContextAssembler`` or
+/// Makes the model show its sources. Requires the output to cite at least one
+/// of the known source IDs supplied at construction, and refuses citations of
+/// unknown IDs — a confident invented reference is still an invention. Pair
+/// with ``DefaultContextAssembler`` or
 /// ``ConversationContextAssembler`` so the known IDs match the
 /// retrieved sources.
 ///

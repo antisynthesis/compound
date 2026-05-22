@@ -1,9 +1,10 @@
 import Foundation
 
+/// The shape of a thousand runs, without keeping a thousand runs.
 /// Aggregates ``TraceEvent`` values into rollup statistics suitable for
-/// a dashboard or a periodic export. Does not replace per-event tracing
-/// — pair with ``OSLogTracer`` or ``SignpostTracer`` via
-/// ``CompositeTracer`` when you want both.
+/// a dashboard or a periodic export. It folds, it does not hoard — and
+/// it does not replace per-event tracing. Pair with ``OSLogTracer`` or
+/// ``SignpostTracer`` via ``CompositeTracer`` when you want both.
 public actor MetricsCollectingTracer: Tracer {
     /// Current aggregated counters and latency stats.
     public private(set) var snapshot: MetricsSnapshot
@@ -76,9 +77,10 @@ public actor MetricsCollectingTracer: Tracer {
     public func current() -> MetricsSnapshot { snapshot }
 }
 
-/// Aggregated counters and latency stats produced by
-/// ``MetricsCollectingTracer``. All fields are mutable by design so
-/// callers can fold additional sources or persist snapshots across runs.
+/// A run of runs, reduced to numbers you can act on. Aggregated counters
+/// and latency stats produced by ``MetricsCollectingTracer``. All fields
+/// are mutable by design so callers can fold additional sources or
+/// persist snapshots across runs.
 public struct MetricsSnapshot: Sendable {
     /// Number of `runStarted` events seen.
     public var runsStarted: Int = 0
@@ -172,11 +174,12 @@ public struct MetricsSnapshot: Sendable {
     }
 }
 
-/// Tiny running-stat record holding count, sum, min, max, and an
-/// approximate `p50`/`p99` via a reservoir-style sample. For production
-/// metrics you typically want a real histogram; this is the
-/// dependency-free version that's still useful in development and small
-/// deployments.
+/// A precise instrument that knows its own limits. A tiny running-stat
+/// record holding count, sum, min, max, and an approximate `p50`/`p99`
+/// via a reservoir-style sample. For production metrics you typically
+/// want a real histogram; this is the honest, dependency-free version
+/// that earns its keep in development and small deployments — and tells
+/// you so rather than pretending to be more.
 public struct LatencyStats: Sendable {
     /// Number of recorded samples.
     public private(set) var count: Int = 0

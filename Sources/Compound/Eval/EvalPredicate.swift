@@ -1,8 +1,10 @@
 import Foundation
 
-/// Contract between an eval case and the harness: given the model's
-/// actual output, did the case pass? The protocol is small so a case
-/// can hold any number of predicates and the runner can compose them.
+/// The question that does not accept a confident answer at face value:
+/// given the model's actual output, did the case pass? The model is a
+/// beautiful liar, so a predicate checks the work, not the swagger. The
+/// protocol stays small so a case can stack any number of them and the
+/// runner can compose them.
 public protocol EvalPredicate: Sendable {
     /// Stable predicate name surfaced in ``EvalReport``.
     var name: String { get }
@@ -82,9 +84,10 @@ public struct MatchesRegexPredicate: EvalPredicate, @unchecked Sendable {
     }
 }
 
-/// Bridges a ``Verifier`` into an ``EvalPredicate``. The predicate
-/// passes iff the verifier returns ``Verdict/pass``; any non-pass
-/// verdict is reported as a failure with the diagnostic embedded.
+/// Conscripts a ``Verifier`` — the system's deterministic disposer — into
+/// eval duty. The predicate passes iff the verifier returns ``Verdict/pass``;
+/// any other verdict is a failure, diagnostic and all. The same instrument
+/// that gates production now interrogates the test bench.
 public struct VerifierPredicate<V: Verifier>: EvalPredicate where V.Input == String {
     /// Underlying verifier.
     public let verifier: V
@@ -102,7 +105,8 @@ public struct VerifierPredicate<V: Verifier>: EvalPredicate where V.Input == Str
     }
 }
 
-/// Inline predicate built from a closure. Useful for one-off cases and tests.
+/// A predicate carved from a closure on the spot — for the one-off check
+/// that doesn't deserve its own type but still has to be answered honestly.
 public struct ClosurePredicate: EvalPredicate {
     public let name: String
     private let body: @Sendable (String, RunContext) async throws -> EvalCheck

@@ -3,9 +3,10 @@ import Foundation
 #if canImport(AppIntents)
 import AppIntents
 
-/// A protocol that adapts a Compound flow into Apple's AppIntents system,
-/// making the same verified, observable, governed pipeline reachable from
-/// Siri, Shortcuts, Spotlight, and the system intent surfaces.
+/// The system meeting the user where they already are. This adapts a Compound
+/// flow into Apple's AppIntents so the same verified, observable, governed
+/// pipeline is reachable from Siri, Shortcuts, Spotlight, and the system intent
+/// surfaces — no second, weaker path bolted on for convenience.
 ///
 /// Adopters supply a `CompoundSession` and a `prompt(from:)` mapping their
 /// `@Parameter` properties to a model prompt. The default `perform()` runs
@@ -33,9 +34,10 @@ extension CompoundIntent {
     /// Default identity: anonymous.
     public var auth: AuthContext { .anonymous }
 
-    /// Runs the underlying ``CompoundSession`` and returns the verified
-    /// output. Translates ``CompoundError`` into ``IntentBridgeError``
-    /// so callers see localized failure reasons.
+    /// Runs the underlying ``CompoundSession`` and returns output that has
+    /// already survived verification — the intent surface gets the disposed
+    /// result, never the raw proposal. Translates ``CompoundError`` into
+    /// ``IntentBridgeError`` so callers see localized failure reasons.
     public func performCompoundRun() async throws -> String {
         let assembledPrompt = try prompt()
         do {
@@ -52,11 +54,12 @@ extension CompoundIntent {
     }
 }
 
-/// A protocol for exposing a single `FoundationModels.Tool` as an AppIntent.
-/// Unlike ``CompoundIntent``, this does not invoke the model — it calls
-/// the underlying tool directly, gated by the same `VerifiedTool` policy
-/// and argument verifiers. The decoded `@Parameter` properties are
-/// converted to `Arguments` via ``arguments()``.
+/// Exposes a single `FoundationModels.Tool` as an AppIntent. Unlike
+/// ``CompoundIntent``, the model never enters the room — this calls the
+/// underlying tool directly, still gated by the same `VerifiedTool` policy
+/// and argument verifiers. Skipping the model does not mean skipping the
+/// guardrails. The decoded `@Parameter` properties are converted to
+/// `Arguments` via ``arguments()``.
 @available(iOS 16.0, macOS 13.0, visionOS 1.0, *)
 public protocol CompoundToolIntent: AppIntent {
     associatedtype Wrapped: AnyObject & Sendable
@@ -66,10 +69,10 @@ public protocol CompoundToolIntent: AppIntent {
     func argumentsBlob() throws -> [String: any Sendable]
 }
 
-/// Type-erased wrapper that decouples a `CompoundToolIntent` from the
-/// concrete `Tool` protocol from `FoundationModels`. Applications keep
-/// their `VerifiedTool` instances inside this adapter so the intent
-/// surface stays Generable-free.
+/// A type-erased seam that decouples a `CompoundToolIntent` from the concrete
+/// `Tool` protocol in `FoundationModels`. Applications keep their
+/// `VerifiedTool` instances inside this adapter so the intent surface stays
+/// Generable-free — the boundary is deliberate, not incidental.
 @available(iOS 16.0, macOS 13.0, visionOS 1.0, *)
 public struct VerifiedToolAdapter<Wrapped>: Sendable {
     private let invoke: @Sendable ([String: any Sendable]) async throws -> String
@@ -91,9 +94,10 @@ public struct VerifiedToolAdapter<Wrapped>: Sendable {
     }
 }
 
-/// Maps `CompoundError`s into `IntentError`s with stable identifying codes
-/// so Shortcuts users see a useful failure reason rather than the raw
-/// description.
+/// Translates a `CompoundError` into something a Shortcuts user can actually
+/// act on: a stable, identifiable code and a useful failure reason instead of
+/// a raw description leaked from the internals. A failure should explain
+/// itself, not mumble.
 @available(iOS 16.0, macOS 13.0, visionOS 1.0, *)
 public struct IntentBridgeError: Swift.Error, CustomLocalizedStringResourceConvertible {
     /// Originating ``CompoundError``.

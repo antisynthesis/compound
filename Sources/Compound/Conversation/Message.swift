@@ -1,12 +1,12 @@
 import Foundation
 
-/// One turn of the user-visible conversation.
+/// One turn of the conversation as a human would recognize it.
 ///
-/// Conversation messages live above the model's internal `Transcript`:
-/// a single Compound run may produce many model-level turns (prompt →
-/// tool calls → repair turns → final), but the conversation records
-/// only the user-facing entries. This is what gets persisted, shown in
-/// chat UIs, and replayed for evaluation.
+/// Conversation messages live above the model's internal `Transcript`.
+/// A single Compound run may churn through many model-level turns (prompt
+/// → tool calls → repair turns → final); the conversation keeps only the
+/// turns a person was meant to see. This is the honest record — what gets
+/// persisted, shown in chat UIs, and replayed for evaluation.
 public struct ConversationMessage: Sendable, Equatable, Identifiable, Codable {
     /// Stable per-message identifier.
     public let id: UUID

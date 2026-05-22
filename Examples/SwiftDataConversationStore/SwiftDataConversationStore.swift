@@ -1,6 +1,8 @@
 // SwiftDataConversationStore.swift
 //
-// Drop-in SwiftData implementation of Compound's `ConversationStore`
+// A precise instrument for one specific reality: persisting conversation
+// history on-device with SwiftData, no server round-trip, nothing leaving the
+// machine. A drop-in implementation of Compound's `ConversationStore`
 // protocol. Copy this file into your app target and adjust the schema
 // if you need additional fields.
 //

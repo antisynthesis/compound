@@ -1,8 +1,10 @@
 import Foundation
 
-/// Structural sanity for Markdown output. Catches the common closing
-/// mistakes — an extra fence line, an unterminated code block, a
-/// half-written link — without requiring a full CommonMark parser.
+/// Structural sanity for Markdown the model swears is finished. Catches
+/// the half-truths it leaves behind — an extra fence line, an
+/// unterminated code block, a link opened and never closed — without
+/// dragging in a full CommonMark parser. A sharp instrument, not a
+/// cathedral.
 public struct MarkdownStructureVerifier: Verifier {
     public typealias Input = String
     public let name: String

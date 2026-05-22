@@ -1,9 +1,10 @@
 import Foundation
 
-// Verifiers for shell commands, the riskiest tool surface in any compound
-// system. Both verifiers operate on the tokenized command so they reason
-// about words and operators rather than raw strings — which means quoting
-// tricks like 'rm' "-rf" / don't slip past them.
+// Verifiers for shell commands — the sharpest, most dangerous surface in any
+// compound system, where a confident sentence becomes an irreversible act.
+// Both verifiers operate on the tokenized command so they reason about words
+// and operators rather than raw strings, which means quoting tricks like
+// 'rm' "-rf" / don't slip past them.
 
 /// Restricts the executable name (segment head) of a shell command to
 /// a fixed allowlist. The allowlist is matched against both the literal

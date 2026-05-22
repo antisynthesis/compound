@@ -1,13 +1,13 @@
 import Foundation
 
-// Verifiers for file paths. Every tool that takes a path is a potential
-// escape route from the workspace and a potential exposure of sensitive
-// files; these two verifiers gate that.
+// Verifiers for file paths. Every tool that takes a path is a door, and a door
+// the model can name is a door it can walk through — out of the workspace,
+// into sensitive files. These two verifiers decide which doors open.
 
-/// Verifies a path resolves inside `workspaceRoot` after symlink
-/// resolution and path normalization. Rejects absolute paths that point
-/// outside the root, relative paths that traverse outside via `..`,
-/// and (optionally) symlinks that redirect outside.
+/// Keeps the model inside the room you put it in. Verifies a path resolves
+/// inside `workspaceRoot` after symlink resolution and path normalization, and
+/// rejects absolute paths that point outside the root, relative paths that
+/// traverse outside via `..`, and (optionally) symlinks that redirect outside.
 ///
 /// Normalization order: percent-decode, NFC canonical decomposition,
 /// then case-folded comparison. APFS volumes default to
@@ -64,11 +64,11 @@ public struct PathSafetyVerifier: Verifier {
     }
 }
 
-/// Rejects paths matching any of a list of regex patterns. The
-/// defaults cover the usual suspects: VCS metadata, dotfiles holding
-/// credentials, SSH/cloud keys, kubeconfig and gcloud directories,
-/// terraform state, package-manager auth files, and PEM/P12 bundles.
-/// Patterns are anchored with `(^|/)` so they match the path component
+/// Names the files nothing should be allowed to touch. Rejects paths matching
+/// any of a list of regex patterns. The defaults cover the usual suspects: VCS
+/// metadata, dotfiles holding credentials, SSH/cloud keys, kubeconfig and
+/// gcloud directories, terraform state, package-manager auth files, and PEM/P12
+/// bundles. Patterns are anchored with `(^|/)` so they match the path component
 /// regardless of directory depth.
 ///
 /// Inputs are percent-decoded and NFC-normalized before matching so

@@ -1,10 +1,11 @@
 import Foundation
 
-// Small, focused parsers for common typed identifiers. Each verifier
-// expects the full input string to be one well-formed value of the
-// format — they are anchored, not search-based.
+// Small, sharp parsers for common typed identifiers. Each verifier expects
+// the full input string to be one well-formed value of the format — they
+// are anchored, not search-based, because "contains something that looks
+// like a UUID" is the kind of loose abstraction that lets bad data through.
 
-/// Validates that the input is a parseable UUID.
+/// Demands a genuine UUID, not a string that resembles one.
 public struct UUIDVerifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -23,8 +24,8 @@ public struct UUIDVerifier: Verifier {
     }
 }
 
-/// Validates that the input parses as an ISO-8601 date with the
-/// supplied formatter options.
+/// Insists a timestamp be a real moment in time, parsing as an ISO-8601
+/// date under the supplied formatter options.
 ///
 /// Marked `@unchecked Sendable` because `ISO8601DateFormatter` is
 /// documented thread-safe (10.12+) but is not formally `Sendable`.
@@ -53,8 +54,8 @@ public struct ISO8601DateVerifier: Verifier, @unchecked Sendable {
     }
 }
 
-/// Validates the input as a permissive SemVer 2.0 string
-/// (`major.minor.patch` plus optional pre-release and build metadata).
+/// Holds the input to the SemVer 2.0 contract — `major.minor.patch` plus
+/// optional pre-release and build metadata — permissively but precisely.
 public struct SemVerVerifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -77,7 +78,7 @@ public struct SemVerVerifier: Verifier {
     }
 }
 
-/// Validates the input as a well-formed email address.
+/// Requires a well-formed email address — structure, not a guess at intent.
 public struct EmailVerifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -99,7 +100,7 @@ public struct EmailVerifier: Verifier {
     }
 }
 
-/// Validates the input as an E.164-format phone number (`+CC...`).
+/// Holds a phone number to the E.164 standard (`+CC...`) and nothing looser.
 public struct PhoneE164Verifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -122,8 +123,8 @@ public struct PhoneE164Verifier: Verifier {
     }
 }
 
-/// Validates the input as a hex string, optionally with a `0x`
-/// prefix and an exact expected byte length.
+/// Reads bytes as bytes. Validates the input as a hex string, optionally
+/// with a `0x` prefix and an exact expected byte length.
 public struct HexStringVerifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -161,7 +162,8 @@ public struct HexStringVerifier: Verifier {
     }
 }
 
-/// Validates the input as a base64 (or base64url) encoded string.
+/// Confirms the input is genuinely base64 (or base64url) encoded, alphabet
+/// and padding both, not merely plausible.
 public struct Base64Verifier: Verifier {
     public typealias Input = String
     public let name: String

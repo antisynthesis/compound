@@ -1,19 +1,20 @@
 import Foundation
 
-// Flags strings that look like API keys, tokens, private keys, or other
-// secrets. The default rule set covers the providers that account for the
-// large majority of credential leaks in the wild: cloud and SaaS APIs,
-// VCS hosting, payment processors, and PEM-formatted private keys. Like
-// PathDenyListVerifier this is a deny-list: when a default rule turns out
-// to be too noisy in practice, swap it out by passing a custom rule set.
+// Catches credentials before the model leaks them. Flags strings that look
+// like API keys, tokens, private keys, or other secrets. The default rule set
+// covers the providers that account for the large majority of credential leaks
+// in the wild: cloud and SaaS APIs, VCS hosting, payment processors, and
+// PEM-formatted private keys. Like PathDenyListVerifier this is a deny-list, and
+// no deny-list is the final word — when a default rule turns out too noisy in
+// practice, swap it out by passing a custom rule set.
 //
 // All patterns use bounded `{n,m}` quantifiers so an attacker cannot pin
 // the regex engine on a pathological input. Inputs above `inputSizeLimit`
 // are rejected outright rather than scanned — the verifier's job is to
 // flag credentials, not to scale linearly with megabytes of model output.
 
-/// Flags strings that look like API keys, tokens, private keys, or
-/// other secrets.
+/// The instrument that keeps secrets on your side of the wire. Flags strings
+/// that look like API keys, tokens, private keys, or other secrets.
 ///
 /// The default rule set covers providers responsible for the bulk of
 /// real-world credential leaks: cloud and SaaS APIs, VCS hosting,

@@ -1,12 +1,15 @@
 import Foundation
 
-/// Typed prompt template with explicit parameters. Prompts are
-/// production code: versioned, testable, swappable.
+/// A prompt is code. Treating it as a loose string you paste in is a lie
+/// waiting to happen — it ships unversioned, untested, and unaccountable.
+/// This is the refusal of that: a typed template with explicit parameters,
+/// versioned and swappable like the production artifact it always was.
 ///
 /// A `PromptTemplate` pairs a body containing `{{name}}` placeholders
 /// with a declared parameter list and a version string. Substitution is
-/// deterministic and strict: missing required parameters throw,
-/// unknown placeholders throw, and unknown parameter names throw.
+/// deterministic and unforgiving: missing required parameters throw,
+/// unknown placeholders throw, and unknown parameter names throw. Nothing
+/// is allowed to fail quietly and pretend it worked.
 public struct PromptTemplate: Sendable, Equatable, Hashable {
     /// Stable template name.
     public let name: String
@@ -17,7 +20,8 @@ public struct PromptTemplate: Sendable, Equatable, Hashable {
     /// Declared parameters; missing requireds cause render-time errors.
     public let parameters: [Parameter]
 
-    /// Declared input to a ``PromptTemplate``.
+    /// A declared input to a ``PromptTemplate`` — named, accounted for, and
+    /// impossible to forget by accident.
     public struct Parameter: Sendable, Equatable, Hashable {
         /// Parameter name as it appears between `{{ }}`.
         public let name: String
@@ -45,9 +49,10 @@ public struct PromptTemplate: Sendable, Equatable, Hashable {
         self.parameters = parameters
     }
 
-    /// Substitutes `values` into ``body``. Verifies every declared
-    /// required parameter has a value, no unknown keys are passed, and
-    /// every placeholder is substituted.
+    /// Resolves `values` into ``body`` and refuses to hand back anything
+    /// half-rendered. Every declared required parameter must have a value,
+    /// no unknown keys may be passed, and every placeholder must be
+    /// substituted — a leaked `{{token}}` is a bug, not output.
     ///
     /// - Throws: ``PromptError/missingParameter(name:template:)`` if a
     ///   required parameter is omitted,
@@ -94,7 +99,8 @@ public struct PromptTemplate: Sendable, Equatable, Hashable {
     }
 }
 
-/// Errors thrown by ``PromptTemplate`` and ``PromptRegistry``.
+/// The ways a prompt can betray you, named explicitly so they surface loud
+/// instead of leaking silently. Thrown by ``PromptTemplate`` and ``PromptRegistry``.
 public enum PromptError: Error, Equatable, CustomStringConvertible {
     /// A required parameter had no caller-supplied value and no default.
     case missingParameter(name: String, template: String)

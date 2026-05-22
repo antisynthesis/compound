@@ -1,6 +1,6 @@
 # SwiftData Conversation Store
 
-A drop-in SwiftData implementation of Compound's `ConversationStore` protocol.
+A drop-in SwiftData implementation of Compound's `ConversationStore` protocol. The conversation stays on the device, in the user's hands — there is no second copy on someone else's server.
 
 ## Why it's a template, not a library file
 

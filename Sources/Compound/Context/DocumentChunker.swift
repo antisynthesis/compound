@@ -1,7 +1,8 @@
 import Foundation
 
-/// One retrievable chunk of a source document, produced by
-/// ``DocumentChunker``.
+/// One retrievable fragment of a source document, cut by
+/// ``DocumentChunker``. The unit at which retrieval decides what is worth
+/// the model's attention.
 public struct DocumentChunk: Sendable, Equatable, Hashable, Identifiable {
     /// Stable per-chunk identifier.
     public let id: String
@@ -24,9 +25,10 @@ public struct DocumentChunk: Sendable, Equatable, Hashable, Identifiable {
     }
 }
 
-/// Pure-function chunkers that split a document into ``DocumentChunk``
-/// values. Embeddings and indexing happen downstream. Two strategies
-/// are bundled: ``slidingWindow(text:documentID:windowSize:overlap:metadata:)``
+/// Pure functions that cut a document into ``DocumentChunk`` values.
+/// Where you cut decides what retrieval can later find, so cut with intent.
+/// Embeddings and indexing happen downstream. Two strategies are bundled:
+/// ``slidingWindow(text:documentID:windowSize:overlap:metadata:)``
 /// (fixed-size with overlap) and
 /// ``paragraphs(text:documentID:softMaxChars:metadata:)`` (paragraph-
 /// aligned).

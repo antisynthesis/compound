@@ -1,9 +1,10 @@
 import Foundation
 
-/// Cross-cutting bundle threaded through every layer of a single Compound
-/// execution: identity for governance, the ``Tracer`` for observability, a
-/// ``ProgressReporter`` for UI binding, and tagging metadata for downstream
-/// filtering.
+/// The run's sense of who it is and who is watching. A cross-cutting
+/// bundle threaded through every layer of a single Compound execution:
+/// identity for governance, the ``Tracer`` so nothing happens off the
+/// books, a ``ProgressReporter`` for UI binding, and tagging metadata
+/// for downstream filtering.
 ///
 /// `RunContext` carries no business state — that lives in the model's
 /// `Transcript`. Treat instances as immutable; ``with(metadata:)`` returns

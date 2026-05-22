@@ -1,9 +1,9 @@
 import Foundation
 
-/// Deterministic judgment returned by a ``Verifier``. The four cases mirror
-/// the pattern's vocabulary: `pass` (move on), `repair` (retry with
-/// diagnostic), `reject` (give up cleanly), `escalate` (defer to a human).
-/// The control loop reacts to each.
+/// The deterministic judgment a ``Verifier`` hands back — the moment the system
+/// disposes of what the model proposed. Four cases, no hedging: `pass` (move
+/// on), `repair` (retry with diagnostic), `reject` (give up cleanly),
+/// `escalate` (defer to a human). The control loop reacts to each.
 public enum Verdict: Sendable, Equatable {
     /// Verification succeeded.
     case pass
@@ -39,10 +39,10 @@ extension Verdict {
     }
 }
 
-/// Structured failure description carried by ``Verdict/repair(_:)``,
-/// ``Verdict/reject(_:)``, and ``Verdict/escalate(_:)``. Pairs a
-/// verifier-identified message with an optional repair suggestion and
-/// source location so consumers can render actionable diagnostics.
+/// A precise account of what went wrong, carried by ``Verdict/repair(_:)``,
+/// ``Verdict/reject(_:)``, and ``Verdict/escalate(_:)``. A failure is only
+/// useful if it can be acted on, so this pairs a verifier-identified message
+/// with an optional repair suggestion and source location.
 public struct Diagnostic: Sendable, Equatable, Hashable {
     /// Name of the originating verifier.
     public let verifier: String
@@ -85,9 +85,10 @@ public struct SourceRange: Sendable, Equatable, Hashable {
     }
 }
 
-/// Cost hint used by ``VerifierChain`` to order verifiers cheapest-first.
-/// Numeric values are deliberate — chains sort ascending. The names mirror
-/// the ladder in the pattern doc: parse, schema, types, lint, unit,
+/// The ladder of conviction. Cheap checks are honest fast; expensive ones earn
+/// their certainty. ``VerifierChain`` uses this to order verifiers
+/// cheapest-first, and the numeric values are deliberate — chains sort
+/// ascending. The names climb the ladder: parse, schema, types, lint, unit,
 /// integration, proof, human.
 public enum VerifierCost: Int, Sendable, Comparable {
     /// Free or near-free structural checks (encoding, parse-ability).

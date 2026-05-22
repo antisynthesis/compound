@@ -1,10 +1,11 @@
 import Foundation
 import os
 
-/// `OSSignposter`-backed tracer that surfaces a Compound run in
-/// Instruments as proper signposted events. Pairs well with
-/// ``OSLogTracer`` (which emits the textual record) and is essential
-/// for profiling latency breakdown across the six layers.
+/// Latency you can see instead of guess at. An `OSSignposter`-backed
+/// tracer that surfaces a Compound run in Instruments as proper
+/// signposted events. Pairs well with ``OSLogTracer`` (which emits the
+/// textual record) and is the instrument you reach for when you need to
+/// know exactly where the time went across the six layers.
 public struct SignpostTracer: Tracer {
     private let signposter: OSSignposter
     private let log: OSLog
@@ -56,9 +57,10 @@ public struct SignpostTracer: Tracer {
     }
 }
 
-/// Fans every recorded event out to multiple tracers so callers can pair
-/// textual ``OSLogTracer`` records with ``SignpostTracer`` signposts (or
-/// any other combination) without subclassing.
+/// One event, many witnesses. Fans every recorded event out to multiple
+/// tracers so callers can pair textual ``OSLogTracer`` records with
+/// ``SignpostTracer`` signposts (or any other combination) without
+/// subclassing.
 ///
 /// Tracers are invoked concurrently inside a task group so a slow tracer
 /// (e.g. a ``JSONLTracer`` doing `fsync`) does not block faster siblings

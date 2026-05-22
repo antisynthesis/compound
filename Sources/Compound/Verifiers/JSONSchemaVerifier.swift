@@ -1,8 +1,9 @@
 import Foundation
 
-/// Validates model output against a pragmatic subset of JSON Schema:
-/// typed objects with required keys, typed arrays with bounds, scalars
-/// with bounds, fixed enumerations, and alternation.
+/// The shape the model must fit, enforced. Validates output against a
+/// pragmatic subset of JSON Schema — typed objects with required keys,
+/// typed arrays with bounds, scalars with bounds, fixed enumerations, and
+/// alternation. Not the whole specification; the part that earns its keep.
 ///
 /// The verifier surfaces structural mismatches as ``Verdict/repair(_:)``
 /// so the control loop can ask the model to produce a corrected
@@ -59,9 +60,10 @@ public struct JSONSchemaVerifier: Verifier {
     }
 }
 
-// Mutable counter passed through every nested validate(...) call so we
-// can stop early on adversarial input. Wrapped in its own type for
-// clarity rather than threading two `inout Int`s by hand.
+// The budget that assumes the input is hostile. A mutable counter threaded
+// through every nested validate(...) call so we can stop early on
+// adversarial input. Wrapped in its own type for clarity rather than
+// threading two `inout Int`s by hand.
 struct ValidationBudget {
     let maxDepth: Int
     let maxNodes: Int
@@ -83,8 +85,8 @@ struct ValidationBudget {
     }
 }
 
-/// Schema description for ``JSONSchemaVerifier``. Each case represents
-/// a JSON type plus the bounds the verifier should enforce.
+/// The contract language for ``JSONSchemaVerifier``. Each case names a JSON
+/// type and the exact bounds the verifier will hold the output to.
 public indirect enum JSONSchema: Sendable, Equatable {
     /// String with optional length bounds and regex pattern.
     case string(minLength: Int? = nil, maxLength: Int? = nil, pattern: String? = nil)

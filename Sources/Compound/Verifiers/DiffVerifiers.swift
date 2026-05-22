@@ -1,10 +1,11 @@
 import Foundation
 
-/// Verifies a unified diff is well-formed: every hunk header parses,
-/// every hunk's line counts match its header, and the total number of
-/// changed lines stays under an optional cap. Catches the most common
-/// patch hallucinations — wrong line numbers, truncated hunks, missing
-/// headers.
+/// A patch is a confident claim about lines that may not exist. This
+/// verifies a unified diff is actually well-formed: every hunk header
+/// parses, every hunk's line counts match its header, and the total number
+/// of changed lines stays under an optional cap. It catches the patch
+/// hallucinations the model states with a straight face — wrong line
+/// numbers, truncated hunks, missing headers.
 public struct UnifiedDiffParseVerifier: Verifier {
     public typealias Input = String
     public let name: String

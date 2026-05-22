@@ -1,11 +1,13 @@
 import Foundation
 
-/// Structured log of everything that happens in a Compound run.
+/// The refusal to ship a black box. A structured record of everything
+/// that happens in a Compound run.
 ///
 /// Every model call, every tool invocation, every verifier verdict, and
 /// every control-loop decision is captured here with enough fidelity to
-/// reconstruct the run after the fact. `TraceEvent` is the substrate of
-/// governance, audit, and post-incident analysis.
+/// reconstruct the run after the fact — to see exactly what the system
+/// did and why. `TraceEvent` is the substrate of governance, audit, and
+/// post-incident analysis: the truth, not the comforting summary.
 ///
 /// Evolution policy: `TraceEvent` is intended to grow over time. To
 /// avoid source-breaking every consumer when a new case is introduced,
@@ -96,9 +98,11 @@ public enum TraceEvent: Sendable {
     }
 }
 
-/// Lets consumers handle only the ``TraceEvent`` cases they care about
-/// while remaining source-stable as new cases are added. Each method
-/// has a no-op default; override only what you need.
+/// Watch only what matters to you, and stay standing when the event set
+/// grows. The refusal to make you handle the whole world to handle your
+/// corner of it: consumers override only the ``TraceEvent`` cases they
+/// care about and remain source-stable as new cases land. Each method has
+/// a no-op default; override only what you need.
 ///
 /// Dispatch happens through ``TraceEvent/accept(_:)``. New cases added
 /// to ``TraceEvent`` must be wired into `accept(_:)` here, but visitor

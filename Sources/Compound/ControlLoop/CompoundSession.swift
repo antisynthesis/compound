@@ -1,14 +1,15 @@
 import Foundation
 import FoundationModels
 
-/// User-facing facade. Bundles the six layers of the Compound pattern
-/// (context, verifiers, tools, governance, observability, control) into a
-/// single configurable entry point so callers can `try await session.respond(to:)`
-/// without assembling parts by hand.
+/// The front door. The six layers of the Compound pattern — context,
+/// verifiers, tools, governance, observability, control — assembled into one
+/// instrument so callers can `try await session.respond(to:)` without wiring
+/// the machine by hand. Easy to hold; that ease is not where the guarantees
+/// come from.
 ///
-/// Each call is a fresh run with its own ``RunContext``, ``ModelClient``,
-/// and ``Budget`` — there is no hidden mutable state across calls beyond
-/// the long-lived registry and configuration.
+/// Each call is a fresh run with its own ``RunContext``, ``ModelClient``, and
+/// ``Budget``. Nothing leaks between calls but the long-lived registry and
+/// configuration — no hidden state, no surprises carried forward.
 ///
 /// # Example
 /// ```swift
@@ -71,7 +72,9 @@ public struct CompoundSession: Sendable {
         }
     }
 
-    /// Runs a single non-streaming compound execution.
+    /// One run, end to end: assemble the context, let the model propose, gate
+    /// the proposal, dispose of what fails. The model proposes; the system
+    /// disposes — and this is where that happens, start to finish.
     ///
     /// - Parameters:
     ///   - userPrompt: The user's prompt for this run.
@@ -124,7 +127,8 @@ public struct CompoundSession: Sendable {
         )
     }
 
-    /// Runs a streaming compound execution.
+    /// The same run with the tokens delivered live. Same gates, no exceptions —
+    /// streaming changes what you see, never what gets to pass.
     ///
     /// Returns a ``StreamingControlLoop/Run`` whose `stream` yields every
     /// ``ProgressEvent`` (model chunks, repair scheduling, completion)

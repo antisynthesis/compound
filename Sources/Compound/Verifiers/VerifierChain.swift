@@ -1,10 +1,12 @@
 import Foundation
 
-/// Runs a heterogeneous set of ``Verifier``s cheapest-first and
-/// short-circuits on the first non-``Verdict/pass`` verdict. Composing a
-/// chain is the primary way clients build a complete disposer: parse
-/// before schema, schema before types, types before tests, and so on.
-/// Order is enforced by ``VerifierCost`` regardless of insertion order.
+/// A complete disposer, assembled from sharper instruments. Runs a
+/// heterogeneous set of ``Verifier``s cheapest-first and short-circuits on the
+/// first non-``Verdict/pass`` verdict — spend nothing proving what a cheap
+/// check already condemned. Composing a chain is the primary way clients build
+/// a disposer: parse before schema, schema before types, types before tests,
+/// and so on. Order is enforced by ``VerifierCost`` regardless of insertion
+/// order, because the guarantee should not depend on the caller remembering it.
 ///
 /// # Example
 /// ```swift

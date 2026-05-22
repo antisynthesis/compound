@@ -1,6 +1,8 @@
 import Foundation
 
-/// One element of a tokenized shell command.
+/// One element of a tokenized shell command — the unit at which a command
+/// stops being a string the model can disguise and becomes a structure the
+/// system can interrogate.
 ///
 /// Produced by ``ShellTokenizer/tokenize(_:)``. Verifiers reason about
 /// tokens rather than raw strings so quoting tricks like
@@ -31,13 +33,14 @@ public enum ShellParseError: Error, Equatable, CustomStringConvertible {
     }
 }
 
-/// Pragmatic POSIX-flavored shell tokenizer.
+/// A surgical, POSIX-flavored shell tokenizer.
 ///
-/// Not a full `/bin/sh` — its job is to give downstream verifiers a
+/// It does not pretend to be `/bin/sh` — that abstraction would be a
+/// beautiful lie. Its single job is to give downstream verifiers a
 /// stable, structured view of the command line so allowlists and
 /// danger rules can be expressed against tokens rather than regex on
 /// raw strings. Quoting and escaping behave closely enough to real
-/// shells that injection attempts surface rather than disguising
+/// shells that injection attempts surface instead of disguising
 /// themselves.
 public enum ShellTokenizer {
     /// Tokenizes `input`.

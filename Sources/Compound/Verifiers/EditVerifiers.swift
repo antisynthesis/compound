@@ -1,9 +1,9 @@
 import Foundation
 
-/// One `str_replace`-style edit proposed by the model. The system
-/// refuses to apply the edit unless ``oldString`` matches exactly once
-/// in the target file, which rejects hallucinated quotations by
-/// construction.
+/// One `str_replace`-style edit proposed by the model — and a proposal is
+/// all it is. The system refuses to apply it unless ``oldString`` matches
+/// exactly once in the target file, which rejects hallucinated quotations
+/// by construction rather than by trust.
 public struct ProposedEdit: Sendable, Equatable, Hashable {
     /// Target file path.
     public let path: String
@@ -20,8 +20,9 @@ public struct ProposedEdit: Sendable, Equatable, Hashable {
     }
 }
 
-/// Closure that reads file content as UTF-8 text. Pluggable so tests
-/// and sandboxed environments can fake the filesystem.
+/// Closure that reads file content as UTF-8 text. Pluggable on purpose, so
+/// tests and sandboxed environments can substitute their own filesystem and
+/// the verifier never has to assume one.
 public typealias FileContentReader = @Sendable (String) throws -> String
 
 /// Default ``FileContentReader`` implementation backed by
@@ -33,10 +34,10 @@ public enum DefaultFileContentReader {
     }
 }
 
-/// Validates that a ``ProposedEdit``'s ``ProposedEdit/oldString`` is
-/// non-empty and matches exactly once in the target file. Multiple
-/// matches require the model to add surrounding context to make the
-/// match unique.
+/// Exactly once, or not at all. Validates that a ``ProposedEdit``'s
+/// ``ProposedEdit/oldString`` is non-empty and matches a single location in
+/// the target file. Ambiguity is not negotiated: multiple matches send the
+/// model back to add surrounding context until the match is unique.
 public struct ExactMatchEditVerifier: Verifier {
     public typealias Input = ProposedEdit
     public let name: String
@@ -100,9 +101,9 @@ public struct ExactMatchEditVerifier: Verifier {
     }
 }
 
-/// Confirms an edit is non-trivial: ``ProposedEdit/oldString`` and
-/// ``ProposedEdit/newString`` differ. Useful as a cheap pre-filter
-/// before invoking ``ExactMatchEditVerifier``.
+/// Refuses busywork. Confirms an edit actually changes something —
+/// ``ProposedEdit/oldString`` and ``ProposedEdit/newString`` differ — and
+/// serves as a cheap pre-filter before the heavier ``ExactMatchEditVerifier``.
 public struct NoOpEditVerifier: Verifier {
     public typealias Input = ProposedEdit
     public let name: String
@@ -121,9 +122,10 @@ public struct NoOpEditVerifier: Verifier {
     }
 }
 
-/// Runs after the edit has been applied to confirm the file actually
-/// changed as proposed. Catches edge cases where the apply step
-/// silently no-ops (e.g. permission errors swallowed upstream).
+/// Trust the outcome, not the intention. Runs after the edit is applied to
+/// confirm the file actually changed as proposed, catching the cases where
+/// the apply step silently no-ops — a permission error swallowed upstream,
+/// a write that never landed.
 public struct EditAppliedVerifier: Verifier {
     public typealias Input = ProposedEdit
     public let name: String

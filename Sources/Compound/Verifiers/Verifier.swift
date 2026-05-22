@@ -1,10 +1,13 @@
 import Foundation
 
-/// Deterministic disposer that gates the stochastic proposer. A verifier
+/// The deterministic disposer. The model proposes; the system disposes. The
+/// model is a beautiful liar — fluent, confident, wrong on its own schedule —
+/// and a verifier is the part that does not negotiate with that confidence. It
 /// inspects a piece of model output (or a tool argument) and returns a
-/// ``Verdict``; the system's reliability bound is the verifier's
-/// reliability bound, which is why every implementation declares its
-/// ``cost`` for cheapest-first chain ordering.
+/// ``Verdict``; the system's reliability bound is the verifier's reliability
+/// bound, which is why every implementation declares its ``cost`` for
+/// cheapest-first chain ordering. No silent abstraction stands between the
+/// proposal and the judgment.
 ///
 /// # Example
 /// ```swift
@@ -36,7 +39,8 @@ public protocol Verifier<Input>: Sendable {
     func verify(_ input: Input, context: RunContext) async throws -> Verdict
 }
 
-/// Type-erased ``Verifier`` for use in heterogeneous chains. The wrapped
+/// A type-erased ``Verifier`` for heterogeneous chains — the seam that lets
+/// instruments of different shapes line up in a single disposer. The wrapped
 /// closure preserves ``name`` and ``cost`` from the source verifier.
 public struct AnyVerifier<Input: Sendable>: Verifier {
     /// Inherited name from the wrapped verifier (or supplied at init).

@@ -1,14 +1,19 @@
 import Foundation
 import FoundationModels
 
-// The stochastic core. ModelClient is the only place in the framework that
-// talks to Apple's on-device LanguageModelSession. Its responsibilities are
-// deliberately narrow: check availability, format the request, run the call,
-// time it, trace it. The compound system's reliability does not come from
-// here — it comes from the verifier and tool layers wrapping this call.
+// The stochastic core, and the only place the framework touches it.
+// ModelClient is the single seam against Apple's on-device
+// LanguageModelSession — nothing leaves the device, no API key, no
+// per-token meter. Its job is deliberately small: check availability,
+// format the request, run the call, time it, trace it. The reliability of
+// the compound system is not born here. It is imposed from the outside, by
+// the verifier and tool layers that wrap this call and refuse to take its
+// word for anything.
 
-/// Non-streaming model surface. Extracted so tests and alternative backends
-/// can inject a fake in place of the concrete ``ModelClient`` actor.
+/// The contract for asking the beautiful liar a question. The system
+/// depends on this surface, never on the concrete ``ModelClient`` actor —
+/// so tests and alternative backends can stand in a fake and the rest of
+/// the framework never notices the difference.
 public protocol ModelResponding: Sendable {
     /// Sends `prompt` and returns the full response as a string.
     func respond(to prompt: String, options: GenerationOptions) async throws -> String
@@ -20,12 +25,13 @@ public protocol ModelResponding: Sendable {
     ) async throws -> T
 }
 
-/// Result of a streaming model call.
+/// A streaming model call, handed back as two bound halves of one thing.
 ///
 /// ``stream`` yields delta chunks (the suffix added since the previous
 /// yield, not the rolling whole) and ``final`` resolves to the full
-/// accumulated output once generation finishes. Cancelling the stream
-/// cancels ``final`` and vice versa.
+/// accumulated output once generation finishes. The two share a fate:
+/// cancel the stream and ``final`` dies with it, and vice versa. No half of
+/// the work outlives the other.
 public struct ModelStreamResult: Sendable {
     /// Delta-chunk stream.
     public let stream: AsyncThrowingStream<String, Error>
@@ -39,8 +45,9 @@ public struct ModelStreamResult: Sendable {
     }
 }
 
-/// Streaming model surface. Lets the control loop hold a protocol
-/// existential rather than the concrete ``ModelClient`` actor.
+/// The streaming face of the same contract, so the control loop holds an
+/// agreement rather than the concrete ``ModelClient`` actor and can swap
+/// out whatever generates the tokens behind it.
 public protocol ModelStreaming: Sendable {
     /// Begins streaming a response to `prompt`. The returned
     /// ``ModelStreamResult`` exposes both per-chunk and final-output APIs.

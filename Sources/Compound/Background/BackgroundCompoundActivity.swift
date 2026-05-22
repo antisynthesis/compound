@@ -4,7 +4,9 @@ import Foundation
 import BackgroundTasks
 #endif
 
-/// A compound run packaged for the platform's background scheduler.
+/// Work that survives the app being closed. A compound run packaged for the
+/// platform's background scheduler, so the hard things keep happening when no
+/// one is watching the screen.
 ///
 /// On iOS-family platforms (iOS, iPadOS, tvOS, visionOS) this wraps Apple's
 /// `BGTaskScheduler` — register the activity at app launch with
@@ -183,10 +185,11 @@ public struct BackgroundCompoundActivity: Sendable {
 }
 
 #if canImport(BackgroundTasks) && (os(iOS) || os(tvOS) || os(visionOS))
-/// Holds the work `Task` so the expiration handler — installed before
-/// the task is spawned — can cancel it. The handler captures the box,
-/// not the task itself, breaking the ordering dependency.
-/// `@unchecked` because mutable state is guarded by `lock` (NSLock).
+/// A box that holds the work `Task` so the expiration handler — installed
+/// before the task even exists — can still reach in and cancel it. The
+/// handler captures the box, not the task, which is what breaks the ordering
+/// dependency cleanly. `@unchecked` because mutable state is guarded by
+/// `lock` (NSLock).
 private final class WorkBox: @unchecked Sendable {
     private let lock = NSLock()
     private var task: Task<Void, Never>?
@@ -205,11 +208,12 @@ private final class WorkBox: @unchecked Sendable {
     }
 }
 
-/// Single-shot gate that guarantees `setTaskCompleted(success:)` runs
-/// exactly once regardless of which path (normal completion vs.
-/// expiration) reaches it first. Uses a plain lock because `BGTask`
-/// is not `Sendable` and cannot cross an actor boundary.
-/// `@unchecked` because mutable state is guarded by `lock` (NSLock).
+/// A single-shot gate that guarantees `setTaskCompleted(success:)` fires
+/// exactly once, no matter which path — clean completion or expiration —
+/// gets there first. Two completions is a bug the OS punishes; this makes
+/// it impossible. Uses a plain lock because `BGTask` is not `Sendable` and
+/// cannot cross an actor boundary. `@unchecked` because mutable state is
+/// guarded by `lock` (NSLock).
 private final class TaskCompletionGate: @unchecked Sendable {
     private let lock = NSLock()
     private var done = false

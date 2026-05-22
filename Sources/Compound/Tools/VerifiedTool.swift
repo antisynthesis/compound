@@ -1,16 +1,17 @@
 import Foundation
 import FoundationModels
 
-/// Wraps any `FoundationModels.Tool` so every invocation is gated by:
+/// Nothing reaches through unguarded. This wraps any
+/// `FoundationModels.Tool` so every invocation is gated by:
 /// (1) a ``Policy`` check against the caller's ``AuthContext``,
 /// (2) a chain of deterministic verifiers run against the decoded
 /// arguments, and (3) full observability through the run's ``Tracer``.
 ///
-/// The wrapped tool only executes if policy allows and argument
-/// verification passes. This is the tool-surface chokepoint of the
-/// Compound pattern — the place where the model's tool calls are
-/// disposed of by the deterministic layer rather than executed
-/// directly.
+/// The wrapped tool executes only if policy allows and argument
+/// verification passes — otherwise it does not run, and the trace says
+/// why. This is the chokepoint where the model reaches into the world: the
+/// place its tool calls are disposed of by the deterministic layer instead
+/// of taken at their word.
 public struct VerifiedTool<Wrapped: Tool>: Tool where Wrapped.Arguments: Sendable {
     public typealias Arguments = Wrapped.Arguments
     public typealias Output = Wrapped.Output

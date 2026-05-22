@@ -2,15 +2,17 @@ import Foundation
 import NaturalLanguage
 
 /// Source of vector embeddings used by ``DenseRetriever``. The default
-/// implementation wraps Apple's `NLEmbedding` (see
-/// ``NLEmbeddingProvider``); plug in a custom provider for domains where
-/// the system embedding model is insufficient.
+/// wraps Apple's on-device `NLEmbedding` (see ``NLEmbeddingProvider``) —
+/// no key, no upload, your text stays yours. Plug in a custom provider
+/// for the domains where the general-purpose model breaks on something as
+/// specific as what you are actually doing.
 public protocol EmbeddingProvider: Sendable {
     /// Returns a vector embedding of `text`.
     func embed(_ text: String) async throws -> [Double]
 }
 
-/// Failure modes for the embedding pipeline.
+/// The ways the embedding pipeline refuses to pretend. Each case is a
+/// failure it would rather name than paper over with a plausible-looking vector.
 public enum EmbeddingError: Error, Equatable {
     /// Apple does not ship a sentence-embedding model for the requested language.
     case notAvailableForLanguage(String)
@@ -21,9 +23,9 @@ public enum EmbeddingError: Error, Equatable {
 }
 
 /// `EmbeddingProvider` backed by Apple's `NLEmbedding`. Runs entirely on
-/// device with no network and no API key. Apple ships pretrained
-/// embeddings for English and a few other languages; consult
-/// `NLEmbedding` documentation for the current availability matrix.
+/// device: no network, no API key, nothing leaving the hand that holds it.
+/// Apple ships pretrained embeddings for English and a few other languages;
+/// consult `NLEmbedding` documentation for the current availability matrix.
 ///
 /// The type is annotated `@unchecked Sendable` because Apple does not
 /// formally document the thread-safety of `NLEmbedding.vector(for:)`.
@@ -53,9 +55,10 @@ public struct NLEmbeddingProvider: EmbeddingProvider, @unchecked Sendable {
 }
 
 /// Dense (vector) retriever over an in-memory corpus of pre-normalized
-/// unit-length embeddings. Cosine similarity reduces to a single dot
-/// product per (query, doc) pair at retrieve time. Suitable for small to
-/// medium corpora; pair with ``HybridRetriever`` for better recall.
+/// unit-length embeddings — it finds what you meant, not just what you
+/// typed. Cosine similarity reduces to a single dot product per (query,
+/// doc) pair at retrieve time. Suitable for small to medium corpora; pair
+/// with ``HybridRetriever`` for better recall.
 public actor DenseRetriever: Retriever {
     // Stored as pre-normalized unit vectors so cosine similarity reduces to
     // a single dot product at retrieve time (no per-query sqrt, no divisor).

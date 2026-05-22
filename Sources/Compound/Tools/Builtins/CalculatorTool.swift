@@ -1,10 +1,11 @@
 import Foundation
 import FoundationModels
 
-/// A side-effect-free arithmetic evaluator the model can call when it needs
-/// to compute a number rather than approximate one. The expression is
+/// Arithmetic with a hard answer, for the moment the model would rather
+/// confidently approximate a number than compute it. The model proposes an
+/// expression; this tool refuses to take it on faith. Every expression is
 /// sandboxed to arithmetic characters before it reaches `NSExpression`, so
-/// the tool cannot be abused to invoke arbitrary key-paths or functions.
+/// it cannot be talked into invoking arbitrary key-paths or functions.
 ///
 /// The result is returned as a string ("42", "3.14159…") so the caller can
 /// embed it back into prose. For multi-step calculations the model is

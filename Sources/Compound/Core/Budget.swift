@@ -1,12 +1,15 @@
 import Foundation
 
-/// Bounds a single Compound run on multiple dimensions so that an
-/// otherwise unbounded propose-and-check loop is guaranteed to terminate.
+/// The leash on the unbounded loop. A model will propose forever if you
+/// let it; this is the refusal to let it. ``Budget`` bounds a single
+/// Compound run on multiple dimensions so an otherwise endless
+/// propose-and-check loop is guaranteed to terminate.
 ///
 /// Every Compound run carries a ``Budget``. The control loop consults it
 /// at every step and stops the moment any one dimension is exhausted, at
 /// which point ``CompoundError/budgetExhausted(_:_:)`` is thrown with the
-/// dimension that tripped and the accumulated ``BudgetUsage``.
+/// dimension that tripped and the accumulated ``BudgetUsage``. The model
+/// proposes; the system disposes.
 ///
 /// # Example
 /// ```swift
@@ -67,8 +70,9 @@ public struct Budget: Sendable, Equatable {
     )
 }
 
-/// Running tally of resources consumed by a single Compound run, mutated
-/// by the control loop and surfaced on ``LoopOutcome`` and
+/// What the run has spent so far, counted honestly. A running tally of
+/// resources consumed by a single Compound run, mutated by the control
+/// loop and surfaced on ``LoopOutcome`` and
 /// ``CompoundError/budgetExhausted(_:_:)``.
 public struct BudgetUsage: Sendable, Equatable {
     /// Number of completed (or attempted) model turns.
@@ -97,8 +101,9 @@ public struct BudgetUsage: Sendable, Equatable {
     public mutating func recordElapsed(_ d: Duration) { elapsed = d }
 }
 
-/// Identifies which dimension of a ``Budget`` was first exhausted during
-/// a run. Returned by ``Budget/remaining(_:)`` and embedded in
+/// Names the wall the run hit, exactly. Identifies which dimension of a
+/// ``Budget`` was first exhausted during a run. Returned by
+/// ``Budget/remaining(_:)`` and embedded in
 /// ``CompoundError/budgetExhausted(_:_:)``.
 public enum BudgetExhaustion: String, Sendable, Equatable {
     /// `maxTurns` was reached.

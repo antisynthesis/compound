@@ -1,6 +1,7 @@
 import Foundation
 
-/// Outcome of an external process invocation.
+/// The unembellished outcome of an external process invocation — exit code,
+/// captured streams, and whether the clock ran out, with nothing inferred.
 public struct ProcessResult: Sendable, Equatable {
     /// POSIX exit code, or `-1` when the process was terminated before exit.
     public let exitCode: Int32
@@ -20,7 +21,9 @@ public struct ProcessResult: Sendable, Equatable {
     }
 }
 
-/// Abstraction for invoking external processes from inside a verifier.
+/// The seam through which a verifier reaches the real world and runs an
+/// external process. Some claims can only be disposed of by execution, not
+/// by inspection — this is the instrument that pays that cost.
 ///
 /// Exposed on every platform so verifiers can be wired up uniformly;
 /// the default ``DefaultProcessRunner`` is gated to platforms with
@@ -40,8 +43,8 @@ public protocol ProcessRunner: Sendable {
     ) async throws -> ProcessResult
 }
 
-/// Canned ``ProcessRunner`` that always returns a predefined
-/// ``ProcessResult``. Used in tests and on platforms where
+/// A ``ProcessRunner`` that runs nothing and always hands back a predefined
+/// ``ProcessResult``. For tests, and for platforms where
 /// `Foundation.Process` is unavailable.
 public struct StubProcessRunner: ProcessRunner {
     /// Result returned for every invocation.
@@ -60,7 +63,8 @@ public struct StubProcessRunner: ProcessRunner {
 }
 
 #if os(macOS) || os(Linux)
-/// Runs child processes with a sanitized environment by default. Pass
+/// Runs child processes with a sanitized environment by default — the child
+/// gets only what it needs, not the keys to the whole machine. Pass
 /// `inheritEnvironment: true` to inherit the parent's full environment
 /// when the child genuinely needs credentials or developer-tool vars.
 public struct DefaultProcessRunner: ProcessRunner {

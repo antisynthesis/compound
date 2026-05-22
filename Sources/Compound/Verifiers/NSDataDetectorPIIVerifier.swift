@@ -1,11 +1,12 @@
 import Foundation
 
-/// Surfaces phone numbers, email addresses, mailing addresses, dates,
-/// links, and transit info using Foundation's `NSDataDetector`. Higher
-/// recall than ``PIIVerifier`` for international phone formats and
-/// full addresses, ships free on every Apple platform. Use
-/// ``PIIVerifier`` when you need a hard guarantee on the exact
-/// categories listed.
+/// Personal-data detection that stays on-device, using Foundation's
+/// `NSDataDetector`. Surfaces phone numbers, email addresses, mailing
+/// addresses, dates, links, and transit info. Higher recall than
+/// ``PIIVerifier`` for international phone formats and full addresses, and ships
+/// free on every Apple platform — no cloud, no third party seeing the data you
+/// are trying to protect. Use ``PIIVerifier`` when you need a hard guarantee on
+/// the exact categories listed.
 public struct NSDataDetectorPIIVerifier: Verifier {
     public typealias Input = String
     public let name: String

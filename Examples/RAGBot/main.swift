@@ -1,9 +1,11 @@
 // RAGBot — grounded question-answering over an indexed corpus.
 //
-// The pattern: a hybrid retriever (lexical BM25 + dense NLEmbedding) finds
-// candidate passages, the assembler injects them as [source-id] citations,
-// the citation verifier requires the model to ground every factual claim,
-// and the eval suite locks the behavior in place across model upgrades.
+// An ungrounded model will answer anything, confidently, including things that
+// are not true. This refuses that. A hybrid retriever (lexical BM25 + dense
+// NLEmbedding) finds candidate passages, the assembler injects them as
+// [source-id] citations, the citation verifier requires the model to ground
+// every factual claim against a real source, and the eval suite nails the
+// behavior in place so the next model upgrade can't quietly erode it.
 //
 // Open in Xcode 26 to run.
 

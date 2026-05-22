@@ -1,8 +1,10 @@
 import Foundation
 
-/// Deterministic transformation applied to text before it reaches the
-/// model. PII patterns, secret patterns, and classification markers are
-/// typical use cases. The model only ever sees what survives this pass.
+/// A hard line drawn in the text before it ever reaches the model.
+/// Deterministic, not hopeful — PII, secrets, classification markers are
+/// removed by rule, not by asking the model nicely. What you refuse to
+/// send is the only thing that can never leak. The model sees only what
+/// survives this pass.
 public protocol Redactor: Sendable {
     /// Stable name surfaced in ``AssembledContext/redactionsApplied``.
     var name: String { get }
@@ -10,7 +12,9 @@ public protocol Redactor: Sendable {
     func redact(_ text: String) -> String
 }
 
-/// ``Redactor`` backed by a single `Regex` substitution.
+/// A single ``Redactor`` blade: one `Regex`, one substitution, no
+/// judgment calls. It cuts exactly what the pattern describes and nothing it
+/// was not told to.
 ///
 /// Marked `@unchecked Sendable` because `Regex<AnyRegexOutput>` is not
 /// formally `Sendable`. All stored fields are immutable and regex
@@ -39,8 +43,8 @@ public struct PatternRedactor: Redactor, @unchecked Sendable {
     }
 }
 
-/// Composes multiple redactors into a single pipeline; members run in
-/// the order supplied at construction.
+/// Stacks redactors into one pipeline; members run in the order supplied
+/// at construction. Many narrow blades instead of one blunt instrument.
 public struct CompositeRedactor: Redactor {
     /// Stable name.
     public let name: String
@@ -59,8 +63,9 @@ public struct CompositeRedactor: Redactor {
     }
 }
 
-/// Convenience set of common redactors. Not a substitute for a real DLP
-/// layer; useful for prototypes and as a baseline.
+/// A starting baseline of common redactors. Honest about its limits: this
+/// is not a real DLP layer, and pretending otherwise would be one of the
+/// beautiful lies. A floor to build on, not a guarantee to lean on.
 public enum CommonRedactors {
     /// Redactor that masks email addresses.
     public static func email() throws -> PatternRedactor {

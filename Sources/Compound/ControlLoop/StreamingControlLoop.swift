@@ -1,7 +1,10 @@
 import Foundation
 import FoundationModels
 
-/// Successful result of ``StreamingControlLoop/run(prompt:modelClient:runContext:)``.
+/// What survives the streaming loop. A result of
+/// ``StreamingControlLoop/run(prompt:modelClient:runContext:)`` — the tokens
+/// you watched arrive are only ratified once the whole turn has passed every
+/// member of the chain. The stream is a courtesy; this is the verdict.
 public struct StreamingLoopOutcome: Sendable {
     /// Final accumulated output that passed every chain member.
     public let final: String
@@ -11,11 +14,11 @@ public struct StreamingLoopOutcome: Sendable {
     public let runID: UUID
 }
 
-/// Streaming variant of ``ControlLoop``. The propose-and-check cycle is
-/// unchanged, but model output is exposed token-by-token to the caller
-/// while the loop is running. Verification still happens on the complete
-/// output once a turn finishes — correctness is preserved by gating on
-/// the final aggregate, not on partial chunks.
+/// Streaming variant of ``ControlLoop``. The propose→check→repair cycle is
+/// unchanged — only the surface is. Tokens reach the caller as they fall
+/// out of the model, but the guarantee does not bend: verification runs on
+/// the complete output once a turn finishes. The stream is a courtesy; the
+/// verdict is gated on the final aggregate, never on a half-formed chunk.
 public struct StreamingControlLoop: Sendable {
     /// Per-run resource caps.
     public let budget: Budget
@@ -43,9 +46,11 @@ public struct StreamingControlLoop: Sendable {
         self.eventBufferLimit = max(1, eventBufferLimit)
     }
 
-    /// Handle returned by ``StreamingControlLoop/run(prompt:modelClient:runContext:)``.
-    /// ``stream`` yields every ``ProgressEvent`` from the run; ``outcome``
-    /// resolves to the final result. Cancelling either cancels the other.
+    /// A handle on a run in flight, returned by
+    /// ``StreamingControlLoop/run(prompt:modelClient:runContext:)``. ``stream``
+    /// yields every ``ProgressEvent``; ``outcome`` resolves to the final
+    /// result. The two are bound together — cancel either and the other dies
+    /// with it. No orphaned work.
     public struct Run: Sendable {
         /// Per-event progress stream.
         public let stream: AsyncThrowingStream<ProgressEvent, Error>
@@ -53,8 +58,9 @@ public struct StreamingControlLoop: Sendable {
         public let outcome: Task<StreamingLoopOutcome, Error>
     }
 
-    /// Begins a streaming run. Returns immediately with a ``Run`` whose
-    /// stream and outcome track progress and completion.
+    /// Begins a streaming run and returns at once with a ``Run`` whose stream
+    /// and outcome track progress and completion. The work starts the moment
+    /// you call; the handle is your only grip on it.
     ///
     /// - Parameters:
     ///   - prompt: The user prompt.

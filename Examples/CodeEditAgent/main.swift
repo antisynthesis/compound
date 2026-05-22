@@ -2,10 +2,12 @@
 // newString) edits and only applies them when the verifier confirms the
 // quotation is real.
 //
-// The pattern: model proposes a ProposedEdit, ExactMatchEditVerifier
-// confirms oldString occurs exactly once in the file, the edit is applied,
-// and EditAppliedVerifier confirms the post-state. Path safety and the
-// secret/path deny-lists gate the input before the model gets it.
+// A model that edits files by paraphrasing what it remembers will corrupt
+// them. This agent gives the model no such latitude: it proposes a
+// ProposedEdit, ExactMatchEditVerifier confirms oldString occurs exactly once
+// in the actual file before a byte is written, the edit is applied, and
+// EditAppliedVerifier confirms the post-state. Path safety and the secret/path
+// deny-lists decide what the model is even allowed to reach for.
 //
 // Open in Xcode 26 to run.
 

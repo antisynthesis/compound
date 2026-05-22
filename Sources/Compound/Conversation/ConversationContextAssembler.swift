@@ -1,7 +1,9 @@
 import Foundation
 
-/// Strategy for compressing the early portion of a conversation when
-/// the full history would overflow the model's context window.
+/// The art of forgetting on purpose. Compresses the early portion of a
+/// conversation when the full history would overflow the model's context
+/// window — because a window stuffed to the edges does not remember more,
+/// it just loses the middle.
 ///
 /// The assembler decides which slice counts as "earlier"; the
 /// summarizer's job is to render that slice into a compact form.
@@ -10,10 +12,11 @@ public protocol ConversationSummarizer: Sendable {
     func summarize(_ messages: [ConversationMessage]) async throws -> String
 }
 
-/// Default ``ConversationSummarizer``. Replaces the input with a
-/// `"(earlier N turns omitted)"` placeholder. Apps that want true
-/// summarization can plug in a ``CompoundSession``-driven summarizer
-/// running against the same on-device model.
+/// The default ``ConversationSummarizer``, and an honest one: it does not
+/// pretend to summarize. It replaces the input with a
+/// `"(earlier N turns omitted)"` placeholder and admits the loss. Apps
+/// that want true summarization can plug in a ``CompoundSession``-driven
+/// summarizer running against the same on-device model.
 public struct TruncatingSummarizer: ConversationSummarizer {
     /// Creates an instance.
     public init() {}
@@ -26,12 +29,12 @@ public struct TruncatingSummarizer: ConversationSummarizer {
     }
 }
 
-/// ``ContextAssembler`` that folds prior ``ConversationMessage``s into
-/// the rendered prompt alongside retrieved sources and redactors. The
-/// default rendering puts a transcript section ahead of the user
-/// prompt so the model has turn history; the supplied
-/// ``ConversationSummarizer`` compresses long conversations before they
-/// overflow the model's context window.
+/// A ``ContextAssembler`` that gives the model a memory without giving it
+/// the whole archive. Folds prior ``ConversationMessage``s into the
+/// rendered prompt alongside retrieved sources and redactors, putting a
+/// transcript section ahead of the user prompt so the model has turn
+/// history. The supplied ``ConversationSummarizer`` compresses the long
+/// tail before it overflows the context window and buries what matters.
 public struct ConversationContextAssembler: ContextAssembler {
     /// Static system instructions.
     public let baseInstructions: String

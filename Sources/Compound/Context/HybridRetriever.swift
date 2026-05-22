@@ -1,10 +1,12 @@
 import Foundation
 
-/// Reciprocal Rank Fusion across multiple ``Retriever``s — typically a
-/// lexical ``BM25Retriever`` and a dense ``DenseRetriever``. RRF avoids
-/// the need for cross-retriever score normalization and is empirically
-/// competitive with more elaborate learned fusions. The default
-/// constant `k=60` follows the Cormack et al. recommendation.
+/// Reciprocal Rank Fusion across multiple ``Retriever``s — typically the
+/// literal match of a lexical ``BM25Retriever`` and the semantic reach of
+/// a dense ``DenseRetriever``. Neither alone sees the whole picture; RRF
+/// fuses them on rank, refusing the false comfort of normalizing scores
+/// that were never on the same scale. It is empirically competitive with
+/// more elaborate learned fusions. The default constant `k=60` follows the
+/// Cormack et al. recommendation.
 public struct HybridRetriever: Retriever {
     /// Member retrievers; results are fused in parallel.
     public let retrievers: [any Retriever]
@@ -67,17 +69,18 @@ public struct HybridRetriever: Retriever {
     }
 }
 
-/// Reorders an existing candidate list using a more expensive signal —
-/// a cross-encoder, a smaller LLM, or a domain-specific scorer. Always
-/// opt-in; callers that do not need the latency cost should skip it.
+/// A second, sharper look. Reorders an existing candidate list using a
+/// more expensive signal — a cross-encoder, a smaller LLM, or a
+/// domain-specific scorer. Always opt-in: precision you pay for only when
+/// it earns its latency. Callers who do not need it should skip it.
 public protocol Reranker: Sendable {
     /// Returns up to `limit` candidates reordered by relevance to `query`.
     func rerank(query: String, candidates: [RetrievedSource], limit: Int) async throws -> [RetrievedSource]
 }
 
-/// Composes a base ``Retriever`` and a ``Reranker`` into a single
-/// retriever surface so the rest of the framework does not need to know
-/// the difference.
+/// Welds a base ``Retriever`` and a ``Reranker`` into one surface, so the
+/// rest of the framework neither knows nor cares that two stages did the
+/// work. Retrieve wide, then cut to what matters.
 public struct RerankingRetriever: Retriever {
     /// Base retriever that produces the candidate set.
     public let base: any Retriever

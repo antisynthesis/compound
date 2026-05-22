@@ -1,11 +1,13 @@
 import Foundation
 import FoundationModels
 
-/// Wraps any `Retriever` as a tool the model can invoke explicitly when it
-/// needs to look something up mid-turn. The model receives the top-K
-/// matching sources rendered as a Markdown list of `[source-id] title —
-/// excerpt`. Pair with ``CitationVerifier`` on the output verifier to
-/// require the model to cite the sources it claims to ground on.
+/// The seam between a model's confidence and the record. Wraps any
+/// `Retriever` as a tool the model must invoke explicitly when it needs to
+/// look something up rather than invent it mid-turn. The model receives the
+/// top-K matching sources as a Markdown list of `[source-id] title —
+/// excerpt`. Pair with ``CitationVerifier`` on the output verifier to force
+/// the model to cite the sources it claims to ground on — fluency is not
+/// evidence.
 public struct SearchTool: Tool {
     public typealias Output = String
 

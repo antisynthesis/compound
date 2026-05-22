@@ -1,8 +1,8 @@
 import Foundation
 
-/// Rejects (or repairs) outputs that contain any of a list of
-/// prohibited terms. Configurable for case-sensitivity and whole-word
-/// matching.
+/// A line the output is not permitted to cross. Rejects (or repairs)
+/// outputs that contain any of a list of prohibited terms. Configurable for
+/// case-sensitivity and whole-word matching.
 public struct ProhibitedTermsVerifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -55,8 +55,9 @@ public struct ProhibitedTermsVerifier: Verifier {
     }
 }
 
-/// Requires the output to contain a set of terms — either every term
-/// (`allRequired: true`) or at least one (`allRequired: false`).
+/// The inverse demand: presence, not absence. Requires the output to
+/// contain a set of terms — either every term (`allRequired: true`) or at
+/// least one (`allRequired: false`).
 public struct RequiredTermsVerifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -106,10 +107,11 @@ public struct RequiredTermsVerifier: Verifier {
     }
 }
 
-/// Validates a logical implication: when `antecedent` holds,
-/// `consequent` must also hold. Useful for cross-field invariants like
-/// `"if status == 'closed' then closedAt != nil"` — easier to read
-/// than two separate predicate verifiers wired together.
+/// Encodes a promise the data must keep. Validates a logical implication:
+/// when `antecedent` holds, `consequent` must also hold. The instrument for
+/// cross-field invariants the model loves to quietly break — like
+/// `"if status == 'closed' then closedAt != nil"` — stated in one place
+/// rather than smeared across two predicate verifiers wired together.
 public struct ImplicationVerifier<Input: Sendable>: Verifier {
     public let name: String
     public let cost: VerifierCost
@@ -144,8 +146,8 @@ public struct ImplicationVerifier<Input: Sendable>: Verifier {
     }
 }
 
-/// Asserts every element of the input collection is distinct. The
-/// element type must be `Hashable` so duplicates can be detected in
+/// Refuses repetition. Asserts every element of the input collection is
+/// distinct. The element type must be `Hashable` so duplicates fall out in
 /// O(n).
 public struct UniqueElementsVerifier<Element: Hashable & Sendable>: Verifier {
     public typealias Input = [Element]
@@ -169,10 +171,10 @@ public struct UniqueElementsVerifier<Element: Hashable & Sendable>: Verifier {
     }
 }
 
-/// SHA-256 content hash check. Useful when a tool returns a payload
-/// that should match a known-good fingerprint, or when the model
-/// asserts a content hash whose claim must hold against the actual
-/// bytes.
+/// Bytes do not lie, so we make them testify. A SHA-256 content hash check
+/// for when a tool returns a payload that must match a known-good
+/// fingerprint, or when the model asserts a content hash whose claim has to
+/// hold against the actual bytes.
 ///
 /// The digester is supplied as a closure so callers can plug in
 /// CryptoKit on Apple platforms while keeping the type signature

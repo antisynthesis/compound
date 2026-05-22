@@ -1,15 +1,17 @@
 import Foundation
 
-// Combinators for composing verifiers. The most important is contramap, which
-// lets a Verifier<String> (e.g. EncodingVerifier, BalancedBracketsVerifier) be
-// reused on a substring of a richer input type — e.g. the newString field of a
-// ProposedEdit.
+// Combinators for composing verifiers — sharp tools, reground for a new edge.
+// The most important is contramap, which lets a Verifier<String> (e.g.
+// EncodingVerifier, BalancedBracketsVerifier) be reused on a substring of a
+// richer input type — e.g. the newString field of a ProposedEdit. Build the
+// check once; aim it wherever the real input lives.
 
 extension Verifier {
-    /// Adapts a `Verifier<Input>` into a `Verifier<NewInput>` by projecting
-    /// the new input to the original input type. Lets a string-level
-    /// verifier (e.g. ``BalancedBracketsVerifier``) gate a field of a
-    /// richer record (e.g. ``ProposedEdit/newString``).
+    /// Re-aims an existing instrument without rebuilding it. Adapts a
+    /// `Verifier<Input>` into a `Verifier<NewInput>` by projecting the new
+    /// input to the original input type — letting a string-level verifier
+    /// (e.g. ``BalancedBracketsVerifier``) gate a field of a richer record
+    /// (e.g. ``ProposedEdit/newString``).
     ///
     /// - Parameters:
     ///   - newName: Optional override for the wrapped verifier's ``name``.

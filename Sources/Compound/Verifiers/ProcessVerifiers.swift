@@ -1,13 +1,16 @@
 import Foundation
 
-// Process-backed verifiers. These delegate to an external authoritative
-// checker (the Swift compiler, the test runner, etc.) and convert its exit
-// code and output into a Verdict. The verifier itself is platform-portable
-// because it accepts a ProcessRunner — on iOS where Foundation.Process is
-// unavailable, supply a custom runner that proxies to a build service.
+// Process-backed verifiers. When the model claims its code compiles, you
+// do not take its word — you ask the one authority that cannot be charmed:
+// the compiler, the test runner. These delegate to that external authority
+// and convert its exit code and output into a Verdict. The verifier stays
+// platform-portable because it accepts a ProcessRunner — on iOS where
+// Foundation.Process is unavailable, supply a custom runner that proxies to
+// a build service.
 
-/// Runs `swift <subcommand>` via a ``ProcessRunner`` and converts the
-/// result into a ``Verdict``. Typically used for `swift build`,
+/// Defers judgment to the toolchain itself. Runs `swift <subcommand>` via a
+/// ``ProcessRunner`` and converts the result into a ``Verdict`` — the model
+/// proposes, the compiler disposes. Typically used for `swift build`,
 /// `swift test`, or `swiftc -typecheck`. The process stderr (or stdout
 /// when stderr is empty) is surfaced — truncated to ``outputBudget``
 /// characters — as the diagnostic's suggestion so the model can react.
@@ -98,10 +101,10 @@ public struct SwiftCommandVerifier: Verifier {
     }
 }
 
-/// Type-checks a Swift source string in isolation by writing it to a
-/// temp file and invoking `swiftc -typecheck`. A fast "does this even
-/// parse and bind names" check to run before more expensive
-/// build/test verifiers.
+/// The cheap interrogation before the expensive one. Type-checks a Swift
+/// source string in isolation by writing it to a temp file and invoking
+/// `swiftc -typecheck` — a fast "does this even parse and bind names"
+/// check to run before you pay for the full build/test verifiers.
 public struct SwiftSnippetTypecheckVerifier: Verifier {
     public typealias Input = String  // raw source
     public let name: String

@@ -1,11 +1,14 @@
 import Foundation
 
-/// Persistence boundary for ``ConversationMessage`` history.
+/// The boundary where conversation history is kept — and where you decide
+/// who keeps it.
 ///
-/// The protocol is intentionally minimal so applications can plug in
-/// CoreData, SwiftData, SQLite, or a network store without changing the
-/// rest of the framework. The bundled ``InMemoryConversationStore`` is
-/// the right default for short-lived sessions, tests, and demos.
+/// Deliberately minimal: append, read, clear. That refusal to assume is
+/// the point — drop in CoreData, SwiftData, SQLite, or a network store
+/// without the rest of the framework noticing, and keep the history under
+/// your own control rather than someone else's. The bundled
+/// ``InMemoryConversationStore`` is the right default for short-lived
+/// sessions, tests, and demos.
 public protocol ConversationStore: Sendable {
     /// Appends `message` to the back of the history.
     func append(_ message: ConversationMessage) async throws
@@ -15,8 +18,9 @@ public protocol ConversationStore: Sendable {
     func clear() async throws
 }
 
-/// Process-local conversation store. Optionally caps the message count;
-/// once exceeded, oldest messages are dropped FIFO.
+/// Process-local conversation store: nothing touches the disk, nothing
+/// outlives the process. Optionally caps the message count; once exceeded,
+/// the oldest messages are dropped FIFO.
 public actor InMemoryConversationStore: ConversationStore {
     private var entries: [ConversationMessage] = []
     /// Optional cap on retained messages.
@@ -49,9 +53,10 @@ public actor InMemoryConversationStore: ConversationStore {
     public var count: Int { entries.count }
 }
 
-/// File-backed conversation store. Appends each message as a JSONL row.
-/// Crash-safe in the usual append-only sense and trivially diffable and
-/// inspectable on disk.
+/// File-backed conversation store. Appends each message as a JSONL row —
+/// a format you can read with your own eyes and grep with your own tools,
+/// no proprietary blob between you and your history. Crash-safe in the
+/// usual append-only sense, trivially diffable and inspectable on disk.
 public actor JSONLConversationStore: ConversationStore {
     /// File the store reads and appends to.
     public let fileURL: URL

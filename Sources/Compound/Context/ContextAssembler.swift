@@ -1,11 +1,12 @@
 import Foundation
 
-// Context assembly is where the model's working context is constructed:
+// Context assembly is where you decide what the model is allowed to see:
 // instructions, retrieved sources, redacted user input, recent transcript.
-// This is the layer in which most enterprise governance lives — the model
-// only sees what assembly chose to admit.
+// Everything past this point is the model's reality. This is the layer that
+// draws the line — the model only ever knows what assembly chose to admit.
 
-/// One unit of retrieved evidence supplied to the model.
+/// One unit of retrieved evidence handed to the model. The model proposes
+/// against what you put in front of it; this is how you choose what that is.
 public struct RetrievedSource: Sendable, Equatable, Hashable {
     /// Stable identifier the model is required to cite by reference.
     public let id: String
@@ -25,14 +26,16 @@ public struct RetrievedSource: Sendable, Equatable, Hashable {
     }
 }
 
-/// Returns ``RetrievedSource``s relevant to a query. Implementations are
-/// expected to bound the result set by `limit`.
+/// Pulls signal out of a sea of irrelevance. Returns ``RetrievedSource``s
+/// relevant to a query; implementations are expected to bound the result set
+/// by `limit` rather than drown the model in everything they could find.
 public protocol Retriever: Sendable {
     /// Retrieves up to `limit` sources for `query`.
     func retrieve(query: String, limit: Int) async throws -> [RetrievedSource]
 }
 
-/// Retriever that always returns no sources.
+/// Retriever that refuses to ground anything — it returns nothing. The
+/// default for runs that must stand on instructions and prompt alone.
 public struct EmptyRetriever: Retriever {
     /// Creates an instance.
     public init() {}
@@ -40,8 +43,8 @@ public struct EmptyRetriever: Retriever {
     public func retrieve(query _: String, limit _: Int) async throws -> [RetrievedSource] { [] }
 }
 
-/// Retriever that returns a prefix of a fixed source list, ignoring the
-/// query. Useful for tests and demos.
+/// Retriever that hands back a fixed source list and ignores the query
+/// entirely. No retrieval, no surprises — a known reality for tests and demos.
 public struct StaticRetriever: Retriever {
     private let sources: [RetrievedSource]
     /// Creates a retriever over the supplied static sources.
@@ -52,9 +55,9 @@ public struct StaticRetriever: Retriever {
     }
 }
 
-/// Result of running a ``ContextAssembler``. Bundles the instructions,
-/// the (possibly redacted) user prompt, retrieved evidence, and a list
-/// of redactor names that fired so callers can attribute scrubbing.
+/// The exact reality handed to the model for one run: instructions, the
+/// (possibly redacted) user prompt, retrieved evidence, and a record of
+/// every redactor that fired so nothing scrubbed leaves without a trace.
 public struct AssembledContext: Sendable {
     /// System instructions for the model.
     public var instructions: String
@@ -96,16 +99,18 @@ public struct AssembledContext: Sendable {
 }
 
 /// Builds an ``AssembledContext`` for a single run. The model only sees
-/// what assembly chose to admit — this is where most enterprise
-/// governance (redaction, retrieval, policy gating) lives.
+/// what assembly chose to admit, so this is where governance actually
+/// lives — redaction, retrieval, and policy gating, decided on device
+/// before a single token reaches the model.
 public protocol ContextAssembler: Sendable {
     /// Assembles the working context for `userPrompt` under `runContext`.
     func assemble(userPrompt: String, runContext: RunContext) async throws -> AssembledContext
 }
 
-/// Default assembler. Runs the supplied ``Redactor`` chain over the user
-/// prompt, asks the policy whether the resulting content is admissible,
-/// and retrieves grounding sources via the configured ``Retriever``.
+/// The default assembler, in order: scrub the prompt through the
+/// ``Redactor`` chain, ask the policy whether what remains is admissible,
+/// then ground the model with sources from the configured ``Retriever``.
+/// Refusal first, retrieval second.
 public struct DefaultContextAssembler: ContextAssembler {
     /// Static system instructions for the model.
     public let baseInstructions: String

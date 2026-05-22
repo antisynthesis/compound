@@ -29,7 +29,8 @@ public struct AuthContext: Sendable, Equatable {
     }
 }
 
-/// Outcome of a ``Policy/evaluate(_:auth:)`` call.
+/// The verdict of a ``Policy/evaluate(_:auth:)`` call: permitted, or denied
+/// with a reason. There is no implicit third option — silence is not consent.
 public enum PolicyDecision: Sendable, Equatable {
     /// The operation is permitted.
     case allow
@@ -44,7 +45,9 @@ public enum PolicyDecision: Sendable, Equatable {
     }
 }
 
-/// What is being authorized. Policy evaluators dispatch on the case.
+/// The thing under authorization, named precisely so policy can dispatch on
+/// exactly what it is — a tool call, a prompt, or model output — and never on
+/// a vague notion of "the request."
 public enum PolicySubject: Sendable {
     /// A tool invocation gated by `requiredScopes`.
     case toolInvocation(name: String, requiredScopes: Set<String>)
@@ -63,9 +66,11 @@ public enum PolicySubject: Sendable {
     }
 }
 
-/// Authority that decides whether a ``PolicySubject`` is permitted for a
-/// given ``AuthContext``. Policies are pure functions of subject and
-/// auth — they should not consult external mutable state.
+/// Explicit, scoped authority. A `Policy` decides whether a ``PolicySubject``
+/// is permitted for a given ``AuthContext`` — nothing is trusted by default,
+/// and the model gets no vote. Policies are pure functions of subject and
+/// auth; they must not consult external mutable state, because authority you
+/// can't reason about isn't authority, it's hope.
 public protocol Policy: Sendable {
     /// Stable policy name surfaced in trace events.
     var name: String { get }
@@ -73,9 +78,10 @@ public protocol Policy: Sendable {
     func evaluate(_ subject: PolicySubject, auth: AuthContext) async -> PolicyDecision
 }
 
-/// Policy that requires the auth context's ``AuthContext/scopes`` to
-/// cover the tool's `requiredScopes`. Always allows prompt and output
-/// subjects.
+/// A policy that grants a tool call only when the caller's
+/// ``AuthContext/scopes`` actually cover the tool's `requiredScopes` — the
+/// scope you weren't granted is the scope you don't get. Prompt and output
+/// subjects always pass here.
 public struct ScopeRequirement: Policy {
     public let name: String = "scope-requirement"
 
@@ -98,8 +104,9 @@ public struct ScopeRequirement: Policy {
     }
 }
 
-/// Policy that allows every subject. Useful as the default for trusted,
-/// single-user contexts and as a placeholder in tests.
+/// A policy that permits everything. Honest about what it is: a deliberate
+/// surrender of the gate, fit only for trusted single-user contexts and
+/// tests. Reach for it knowingly, never by accident.
 public struct AllowAll: Policy {
     public let name: String = "allow-all"
     /// Creates an instance.
@@ -108,8 +115,9 @@ public struct AllowAll: Policy {
     public func evaluate(_: PolicySubject, auth _: AuthContext) async -> PolicyDecision { .allow }
 }
 
-/// AND-composes multiple policies; the first member that returns
-/// `.deny` short-circuits.
+/// Composes policies under AND: every member must allow, and the first one to
+/// return `.deny` ends the conversation. A single refusal is enough; consensus
+/// is not required to say no.
 public struct CompositePolicy: Policy {
     /// Stable name.
     public let name: String

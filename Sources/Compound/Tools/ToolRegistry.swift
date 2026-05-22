@@ -1,10 +1,11 @@
 import Foundation
 import FoundationModels
 
-/// Existential descriptor for a tool that knows how to instantiate
-/// itself as a ``VerifiedTool`` for a specific run. The registry uses
-/// this protocol to hide the per-tool `Arguments` associated type from
-/// callers that just want to enumerate registrations.
+/// The promise a tool makes before a run exists: that when the moment
+/// comes, it can forge itself into a ``VerifiedTool`` bound to that run's
+/// reality. The registry leans on this protocol to hide the per-tool
+/// `Arguments` associated type from callers that just want to enumerate
+/// what is on the table.
 public protocol ToolRegistration: Sendable {
     /// Stable tool name (matches the wrapped `Tool.name`).
     var name: String { get }
@@ -14,9 +15,10 @@ public protocol ToolRegistration: Sendable {
     func instantiate(runContext: RunContext, policy: any Policy) -> any Tool
 }
 
-/// Concrete ``ToolRegistration`` for a single `FoundationModels.Tool`.
-/// Owns the per-tool argument verifier chain so the wrapped tool's
-/// arguments are always gated before execution.
+/// A concrete ``ToolRegistration`` for one `FoundationModels.Tool`. It
+/// owns the per-tool argument verifier chain, so the arguments the model
+/// proposes are always disposed of by a verifier before the tool fires —
+/// never on trust, never unguarded.
 public struct GenericToolRegistration<Wrapped: Tool>: ToolRegistration where Wrapped.Arguments: Sendable {
     /// Underlying tool.
     public let wrapped: Wrapped
@@ -54,9 +56,11 @@ public struct GenericToolRegistration<Wrapped: Tool>: ToolRegistration where Wra
     }
 }
 
-/// Collects tools alongside the deterministic metadata the model never
-/// sees (required scopes, argument verifiers) and instantiates per-run
-/// ``VerifiedTool`` wrappers bound to the live ``RunContext``.
+/// The catalogue of what the model is permitted to reach for, and the
+/// terms it never gets to see. The registry pairs each tool with the
+/// deterministic metadata the model is never shown — required scopes,
+/// argument verifiers — then forges per-run ``VerifiedTool`` wrappers
+/// bound to the live ``RunContext``. The model asks; this layer decides.
 ///
 /// # Example
 /// ```swift

@@ -1,10 +1,12 @@
 import Foundation
 
-/// Exponential-backoff retry policy with jitter. Designed for transient
-/// failures around the model invocation and the network-facing edges of
-/// tools (rate limits, model availability hiccups). Verifier-level repair
-/// is a separate concern handled by the control loop — retries here are
-/// for the underlying call, not for output correctness.
+/// Patience with a hard edge. An exponential-backoff retry policy with
+/// jitter, built for the failures that are genuinely transient — the
+/// network-facing edges of tools, the model that blinked (rate limits,
+/// availability hiccups) — and not for the failures that are lying to
+/// you about being transient. Verifier-level repair is a separate
+/// concern handled by the control loop; retries here are for the
+/// underlying call, never for output correctness.
 public struct RetryPolicy: Sendable, Equatable {
     /// Maximum total attempts (including the first).
     public let maxAttempts: Int
@@ -57,17 +59,21 @@ public struct RetryPolicy: Sendable, Equatable {
     }
 }
 
-/// Classifies an error as either a transient failure worth retrying or a
-/// terminal failure that should surface immediately.
+/// The judgment call that keeps retry honest: is this failure worth
+/// trying again, or is it terminal and pretending otherwise? Classifies
+/// an error as either a transient failure worth retrying or a terminal
+/// failure that should surface immediately.
 public protocol RetryClassifier: Sendable {
     /// Returns `true` if `error` is worth a retry.
     func isTransient(_ error: any Error) -> Bool
 }
 
-/// Default classifier. Treats common `URLError` connectivity hiccups and
+/// The conservative default: retry only what is plausibly worth
+/// retrying. Treats common `URLError` connectivity hiccups and
 /// ``CompoundError/modelUnavailable(reason:)`` as transient; everything
-/// else is terminal. Callers can extend this by composing with a
-/// domain-specific classifier through ``UnionRetryClassifier``.
+/// else is terminal until proven otherwise. Callers can sharpen it by
+/// composing a domain-specific classifier through
+/// ``UnionRetryClassifier``.
 public struct DefaultRetryClassifier: RetryClassifier {
     /// Creates an instance.
     public init() {}
@@ -91,8 +97,9 @@ public struct DefaultRetryClassifier: RetryClassifier {
     }
 }
 
-/// Composes multiple classifiers; an error is transient if any member
-/// claims it.
+/// Many opinions about a single failure, reconciled by the most generous
+/// one. Composes multiple classifiers; an error is transient if any
+/// member claims it.
 public struct UnionRetryClassifier: RetryClassifier {
     /// Member classifiers, evaluated in order.
     public let classifiers: [any RetryClassifier]
@@ -104,8 +111,9 @@ public struct UnionRetryClassifier: RetryClassifier {
     }
 }
 
-/// Namespace for retry helpers. Use ``Retry/with(policy:classifier:body:)``
-/// to wrap any retryable async operation.
+/// Where the patience gets applied. Namespace for retry helpers; use
+/// ``Retry/with(policy:classifier:body:)`` to wrap any retryable async
+/// operation in a bounded, cancellable loop.
 public enum Retry {
     /// Runs `body`, retrying transient failures up to `policy.maxAttempts`.
     /// Honors task cancellation between attempts.

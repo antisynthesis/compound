@@ -1,10 +1,11 @@
 import Foundation
 import os
 
-/// Sink for structured ``TraceEvent`` values. Implementations should be
-/// non-blocking and idempotent. The control loop emits trace events on
-/// the critical path and never awaits a response from the tracer beyond
-/// the actor hop.
+/// The place where nothing happens off the books. A sink for structured
+/// ``TraceEvent`` values — every model call, every verdict, every
+/// decision, written down. Implementations should be non-blocking and
+/// idempotent. The control loop emits trace events on the critical path
+/// and never awaits a response from the tracer beyond the actor hop.
 ///
 /// # Example
 /// ```swift
@@ -16,7 +17,9 @@ public protocol Tracer: Sendable {
     func record(_ event: TraceEvent) async
 }
 
-/// No-op ``Tracer``; the default in ``RunContext``.
+/// The tracer that remembers nothing. A no-op ``Tracer`` and the default
+/// in ``RunContext`` — present so the seam never has to check for nil,
+/// silent until you choose to see.
 public struct NullTracer: Tracer {
     /// Creates an instance.
     public init() {}
@@ -24,8 +27,10 @@ public struct NullTracer: Tracer {
     public func record(_: TraceEvent) async {}
 }
 
-/// Bounded in-memory tracer. Stores up to ``capacity`` events in FIFO
-/// order; oldest events are dropped once the cap is exceeded.
+/// The whole run, held in the hand and nowhere else. A bounded
+/// in-memory tracer that stores up to ``capacity`` events in FIFO order;
+/// the oldest events are dropped once the cap is exceeded. Memory that
+/// never touches disk and never leaves the process.
 public actor InMemoryTracer: Tracer {
     /// Events captured so far.
     private(set) public var events: [TraceEvent] = []
@@ -61,13 +66,15 @@ public actor InMemoryTracer: Tracer {
     }
 }
 
-/// Apple `os.Logger`-backed tracer with configurable privacy markings.
-/// Default ``PrivacyLevel/balanced`` keeps stable identifiers public
-/// (run IDs, counts, verifier names) while routing free-form text to
-/// `.private` so log archives do not leak embedded secrets or PII.
+/// Observability that refuses to leak. An Apple `os.Logger`-backed
+/// tracer with configurable privacy markings: you get to see the run
+/// without the run carrying your secrets into the log archive. Default
+/// ``PrivacyLevel/balanced`` keeps stable identifiers public (run IDs,
+/// counts, verifier names) while routing free-form text to `.private`
+/// so log archives do not leak embedded secrets or PII.
 public struct OSLogTracer: Tracer {
-    /// Controls how strongly `TraceEvent` fields are redacted when
-    /// emitted to OSLog.
+    /// The leash on what the log is allowed to remember. Controls how
+    /// strongly `TraceEvent` fields are redacted when emitted to OSLog.
     ///
     /// Reject reasons, repair messages, info text, and similar fields
     /// may carry raw model input — including URLs/paths with embedded
@@ -253,16 +260,20 @@ public struct OSLogTracer: Tracer {
     }
 }
 
-/// Appends one JSON object per event to a file. Errors during write are
-/// logged at `.error` via `os.Logger` and otherwise swallowed (the
-/// ``Tracer`` protocol is non-throwing). A configurable ``FlushPolicy``
-/// controls when the underlying file handle is synchronized to disk.
+/// The run, written down one line at a time, in a format you can read
+/// without our help. Appends one JSON object per event to a file. Errors
+/// during write are logged at `.error` via `os.Logger` and otherwise
+/// swallowed (the ``Tracer`` protocol is non-throwing). A configurable
+/// ``FlushPolicy`` controls when the underlying file handle is
+/// synchronized to disk — durability is a choice you make, not one we
+/// make for you.
 ///
 /// Single-writer requirement: this type owns the file handle for its
 /// lifetime. Pointing two instances at the same URL interleaves writes
 /// unpredictably — use one tracer per file.
 public actor JSONLTracer: Tracer {
-    /// When the file handle is synchronized to disk.
+    /// The bargain between speed and certainty, struck on your terms: when
+    /// the file handle is synchronized to disk.
     public enum FlushPolicy: Sendable, Equatable {
         /// Never call `fsync`; rely on the OS to flush.
         case never

@@ -1,8 +1,9 @@
 import Foundation
 
-/// Pure-Swift, in-memory BM25 lexical retriever. Suitable for
-/// tens-of-thousands of chunks; for larger corpora plug in a
-/// SQLite-FTS-backed retriever instead.
+/// Pure-Swift, in-memory BM25 lexical retriever. No service, no network,
+/// no third party between you and your own corpus — the index lives where
+/// the data lives. Suitable for tens-of-thousands of chunks; for larger
+/// corpora plug in a SQLite-FTS-backed retriever instead.
 ///
 /// Implements Robertson/Zaragoza BM25 with default `k1 = 1.2` and
 /// `b = 0.75`, matching the textbook configuration most off-the-shelf
@@ -100,8 +101,9 @@ public actor BM25Retriever: Retriever {
         averageLength = Double(totalLength) / Double(documents.count)
     }
 
-    /// Scores every indexed document against `query` and returns the
-    /// top-`limit` results ordered by descending BM25 score.
+    /// Scores every indexed document against `query` and surfaces only the
+    /// top-`limit`, ordered by descending BM25 score. Precision over a sea
+    /// of irrelevance — the rest stays out of the model's way.
     public func retrieve(query: String, limit: Int) async throws -> [RetrievedSource] {
         let qTokens = tokenizer(query)
         guard !documents.isEmpty, !qTokens.isEmpty else { return [] }

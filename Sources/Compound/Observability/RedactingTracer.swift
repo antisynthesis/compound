@@ -1,10 +1,12 @@
 import Foundation
 
-/// Wraps another ``Tracer`` and applies a chain of ``Redactor`` rules to
-/// every string-valued field on each ``TraceEvent`` before forwarding to
-/// the inner tracer. The symmetric counterpart to running redactors on
-/// model-bound prompts: anything that goes back out through the trace
-/// pipe (OSLog, JSONL on disk, a remote sink) gets the same scrubbing.
+/// So the trace never carries the raw secret. Wraps another ``Tracer``
+/// and applies a chain of ``Redactor`` rules to every string-valued
+/// field on each ``TraceEvent`` before forwarding to the inner tracer.
+/// The symmetric counterpart to running redactors on model-bound
+/// prompts: anything that goes back out through the trace pipe (OSLog,
+/// JSONL on disk, a remote sink) gets the same scrubbing. What leaves
+/// the device is scrubbed at the door.
 ///
 /// Numeric fields (counts, durations, byte sizes) and identifiers
 /// (UUIDs, ``VerifierCost`` raw values, ``BudgetExhaustion`` raw values)

@@ -7,16 +7,18 @@ import Glibc
 import Musl
 #endif
 
-// Gates URLs proposed by the model before they reach a fetch tool. Reject
-// non-HTTPS schemes by default, optionally restrict to an allow-list of
-// hosts, and refuse private-network targets so that SSRF attempts via the
-// fetch tool don't succeed.
+// The gate between a model-proposed URL and a fetch tool. A URL is a request
+// to reach into the network on the model's word; this is where that word is
+// checked. Reject non-HTTPS schemes by default, optionally restrict to an
+// allow-list of hosts, and refuse private-network targets so SSRF attempts
+// routed through the fetch tool do not succeed.
 
-/// Validates URLs against scheme/host allow-lists and blocks
-/// private-network targets so SSRF attempts via a fetch tool do not
-/// succeed. IP-literal hosts are canonicalized via `inet_pton` so that
-/// alternative encodings (octal, hex, integer, IPv4-mapped IPv6) are
-/// caught.
+/// Decides which URLs the model is allowed to reach. Validates against
+/// scheme/host allow-lists and blocks private-network targets so SSRF
+/// attempts via a fetch tool do not succeed. A clever encoding is still
+/// the same address underneath, so IP-literal hosts are canonicalized via
+/// `inet_pton` and alternative encodings (octal, hex, integer,
+/// IPv4-mapped IPv6) are caught.
 ///
 /// IDN homograph hosts are rejected outright — callers should supply
 /// allow-list entries in Punycode (`xn--` form).

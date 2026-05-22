@@ -2,8 +2,10 @@ import Foundation
 import FoundationModels
 import Compound
 
-// End-to-end demonstration of the Compound pattern wired against Apple's
-// on-device Foundation Models.
+// The whole thesis in one file: a stochastic proposer wired to a deterministic
+// system that disposes of what it proposes. A model that lies fluently, fenced
+// in by scoped tools, argument verifiers, an output chain, and a budget — all
+// running on-device, nothing leaving the machine. The hard thing made possible.
 //
 // This file is NOT part of `swift build` because it uses the @Generable
 // macro from FoundationModels, which requires the FoundationModelsMacros

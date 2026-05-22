@@ -1,9 +1,10 @@
 import Foundation
 
-/// Verifies basic encoding hygiene on a string output. Swift's `String`
-/// invariant already guarantees valid UTF-8, so the remaining hazards
-/// are NUL bytes, replacement characters from earlier decode failures,
-/// and CRLF line endings sneaking into LF-only files.
+/// Encoding hygiene, checked rather than assumed. Swift's `String`
+/// invariant already guarantees valid UTF-8, so the remaining hazards are
+/// the ones that slip in unannounced: NUL bytes, replacement characters
+/// left behind by an earlier decode failure, and CRLF line endings
+/// creeping into LF-only files.
 public struct EncodingVerifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -48,10 +49,10 @@ public struct EncodingVerifier: Verifier {
     }
 }
 
-/// Walks the input maintaining a bracket stack. Strings and comments
-/// are skipped by default so text inside `"doesn't]"` or
-/// `// ignore [me]` does not cause false positives. Cheap and one of
-/// the most useful defenses against truncated code outputs.
+/// Walks the input maintaining a bracket stack — the cheapest, sharpest
+/// defense against the output the model cut off mid-thought and handed
+/// over anyway. Strings and comments are skipped by default so text
+/// inside `"doesn't]"` or `// ignore [me]` does not trip a false alarm.
 public struct BalancedBracketsVerifier: Verifier {
     public typealias Input = String
     public let name: String
@@ -160,9 +161,9 @@ public struct BalancedBracketsVerifier: Verifier {
     }
 }
 
-/// Enforces a min/max line count. Useful for catching cases where the
-/// model decided to rewrite an entire file rather than make a targeted
-/// edit.
+/// Enforces a min/max line count — the blunt tell that the model decided
+/// to rewrite an entire file when it was asked for a surgical edit.
+/// Ambition is not the same as correctness.
 public struct LineCountVerifier: Verifier {
     public typealias Input = String
     public let name: String

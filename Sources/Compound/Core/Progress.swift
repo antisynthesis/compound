@@ -1,10 +1,11 @@
 import Foundation
 
-/// High-frequency, UI-facing notification emitted by the control loop and
-/// model client during a run. Separate from ``TraceEvent``: traces are
-/// structured-log diagnostics for operators and audits, whereas progress
-/// is the live signal a SwiftUI view binds to. Both are emitted in
-/// parallel — neither replaces the other.
+/// The run, made visible while it is still happening. A high-frequency,
+/// UI-facing notification emitted by the control loop and model client
+/// during a run. Separate from ``TraceEvent``: traces are the
+/// structured record for operators and audits, whereas progress is the
+/// live signal a SwiftUI view binds to. Both are emitted in parallel —
+/// neither replaces the other.
 public enum ProgressEvent: Sendable {
     /// Emitted once at the start of a run.
     case runStarted(runID: UUID)
@@ -28,8 +29,9 @@ public enum ProgressEvent: Sendable {
     case runCompleted(success: Bool)
 }
 
-/// Sink for ``ProgressEvent`` values. Implementations should be cheap and
-/// non-blocking; the control loop emits progress on the critical path.
+/// Where the live signal goes. A sink for ``ProgressEvent`` values;
+/// implementations must be cheap and non-blocking, because the control
+/// loop emits progress on the critical path and will not wait for you.
 public protocol ProgressReporter: Sendable {
     /// Records a progress event. Implementations may buffer, fan out, or
     /// discard at will.
@@ -44,8 +46,9 @@ public struct NullProgressReporter: ProgressReporter {
     public func report(_: ProgressEvent) async {}
 }
 
-/// Buffered reporter useful in unit tests: events accumulate in arrival
-/// order and can be inspected via ``snapshot()``.
+/// Progress, caught and held so a test can interrogate it. A buffered
+/// reporter that accumulates events in arrival order for inspection via
+/// ``snapshot()``.
 public actor RecordingProgressReporter: ProgressReporter {
     /// Events captured so far, in order.
     public private(set) var events: [ProgressEvent] = []
@@ -61,7 +64,8 @@ public actor RecordingProgressReporter: ProgressReporter {
     public func clear() { events.removeAll() }
 }
 
-/// Stream-based reporter for SwiftUI. ``subscribe()`` returns an
+/// The live run, piped straight into the interface watching it. A
+/// stream-based reporter for SwiftUI: ``subscribe()`` returns an
 /// `AsyncStream` and every ``report(_:)`` fans the event out to all live
 /// subscribers. Subscribers are cleaned up on cancellation.
 ///

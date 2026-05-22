@@ -1,11 +1,12 @@
 import Foundation
 
-/// The umbrella error type thrown across Compound's framework boundaries.
+/// Errors that tell the truth instead of a comforting lie. The umbrella
+/// error type thrown across Compound's framework boundaries.
 ///
 /// `CompoundError` is intentionally a single enum so callers have one type
 /// to catch at the surface of a run, but it carries enough structure that
-/// callers do not have to string-match its description. Use ``severity``
-/// and ``layer`` to route programmatically.
+/// you never have to string-match a description to know what broke and
+/// where. Use ``severity`` and ``layer`` to route programmatically.
 public enum CompoundError: Error, Sendable, CustomStringConvertible {
     /// The control loop hit a hard budget limit (turns, tool calls,
     /// repair attempts, wall clock, or output tokens) before reaching a
@@ -73,9 +74,10 @@ public enum CompoundError: Error, Sendable, CustomStringConvertible {
 }
 
 extension CompoundError {
-    /// Whether a caller could reasonably recover from this error by issuing
-    /// another turn, repairing input, or asking a human — versus terminating
-    /// the run.
+    /// The honest distinction between "try again differently" and "this
+    /// run is over." Whether a caller could reasonably recover from this
+    /// error by issuing another turn, repairing input, or asking a human
+    /// — versus terminating the run.
     public enum Severity: Sendable, Equatable {
         /// The error can be retried with a different strategy or after operator
         /// input; the framework itself can re-enter a loop safely.
@@ -98,8 +100,10 @@ extension CompoundError {
         }
     }
 
-    /// Which architectural layer originated the error, for dashboarding and
-    /// alert routing without string-matching ``description``.
+    /// Where the failure actually came from — named, not guessed.
+    /// Identifies which architectural layer originated the error, for
+    /// dashboarding and alert routing without string-matching
+    /// ``description``.
     public enum Layer: String, Sendable, Equatable {
         /// Budget enforcement (turns, tool calls, repair attempts, wall clock, tokens).
         case budget

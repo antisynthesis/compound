@@ -1,20 +1,14 @@
 import Foundation
 import FoundationModels
 
-/// A key-value store the model can read and write within a run. Useful for
-/// multi-turn flows where the model needs scratch space — pinning an
-/// extracted entity for later turns, accumulating partial results, stashing
-/// a tool's output for re-use.
-///
-/// Every backend method takes a `principal: String` so the store can be
-/// shared across `CompoundSession` instances without leaking keys across
-/// tenants. The built-in ``InMemoryKVStoreBackend`` namespaces internally
-/// per-principal; ``SharedKVStoreBackend`` is provided for callers who
-/// explicitly want a single global keyspace and accept the cross-principal
-/// visibility that implies.
-/// Storage backend for ``KVStoreTool``. Every method takes a
-/// `principal` so a single backend can be shared safely across
-/// ``CompoundSession`` instances without leaking keys across tenants.
+/// The contract for where the model's scratch space actually lives — and
+/// for whom. Every backend method takes a `principal: String`, because a
+/// keyspace without an owner is a leak waiting to happen: this is how one
+/// backend serves many ``CompoundSession`` instances without one tenant's
+/// keys bleeding into another's. The built-in ``InMemoryKVStoreBackend``
+/// namespaces per-principal; ``SharedKVStoreBackend`` exists only for the
+/// caller who deliberately wants one global keyspace and accepts every
+/// consequence that implies.
 public protocol KVStoreBackend: Sendable {
     /// Returns the value stored at `key` for `principal`, or `nil`.
     func get(_ key: String, principal: String) async throws -> String?
@@ -26,8 +20,10 @@ public protocol KVStoreBackend: Sendable {
     func keys(principal: String) async throws -> [String]
 }
 
-/// Process-local in-memory store that isolates keys per `principal`. Two
-/// callers with different principals see disjoint keyspaces.
+/// On-device, process-local, and walled off by `principal`. Nothing
+/// persists, nothing escapes the process, and two callers with different
+/// principals see strictly disjoint keyspaces — isolation by construction,
+/// not by convention.
 public actor InMemoryKVStoreBackend: KVStoreBackend {
     private var stores: [String: [String: String]] = [:]
     /// Creates an empty backend.
@@ -53,10 +49,11 @@ public actor InMemoryKVStoreBackend: KVStoreBackend {
     }
 }
 
-/// Single shared keyspace across all principals. Use this only when you
-/// explicitly want every caller to see every other caller's keys — for
-/// example, an offline-only single-user app. For multi-tenant or
-/// per-user-account scenarios prefer ``InMemoryKVStoreBackend``.
+/// One keyspace, no walls. Reach for this only when you have decided, on
+/// purpose, that every caller should see every other caller's keys — an
+/// offline single-user app, say. For anything multi-tenant or
+/// per-user-account, this is the wrong instrument; use
+/// ``InMemoryKVStoreBackend`` instead.
 public actor SharedKVStoreBackend: KVStoreBackend {
     private var store: [String: String] = [:]
     /// Creates an empty backend.
@@ -67,10 +64,11 @@ public actor SharedKVStoreBackend: KVStoreBackend {
     public func keys(principal _: String) async -> [String] { Array(store.keys).sorted() }
 }
 
-/// Key-value scratch space the model can read and write within a run.
-/// Useful for multi-turn flows where the model needs scratch space —
-/// pinning an extracted entity for later turns, accumulating partial
-/// results, stashing a tool's output for re-use.
+/// Memory the model can reach for within a run, and not one byte further.
+/// Scratch space for multi-turn work — pinning an extracted entity for
+/// later turns, accumulating partial results, stashing a tool's output for
+/// re-use. The model reads and writes; it never sees or chooses the
+/// principal its keys are filed under.
 public struct KVStoreTool: Tool {
     public typealias Output = String
 
@@ -170,10 +168,11 @@ public struct KVStoreTool: Tool {
     }
 }
 
-/// Tool registration that rebinds ``KVStoreTool`` to the caller's
-/// principal at instantiation, so the same registered tool serves
-/// multiple `CompoundSession` invocations with different `AuthContext`s
-/// without leaking keys between them.
+/// The registration that keeps tenants honest. It rebinds ``KVStoreTool``
+/// to the caller's principal at the instant of instantiation, so one
+/// registered tool can serve many `CompoundSession` invocations under
+/// different `AuthContext`s without a single key crossing the line between
+/// them. Identity is decided here, not by the model.
 public struct KVStoreToolRegistration: ToolRegistration {
     /// Template tool whose principal is replaced at instantiation.
     public let tool: KVStoreTool
