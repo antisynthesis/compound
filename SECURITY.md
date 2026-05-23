@@ -36,6 +36,6 @@ Out-of-scope: vulnerabilities in dependencies (file with the dependency), vulner
 
 ## Threat model
 
-Compound treats the **model** as an unreliable proposer. Output from the model is **untrusted**. Every public interface that crosses a deterministic boundary — `Verifier`, `Tool`, `Policy`, `Redactor` — is in scope for misuse-resistance review.
+The **model** is treated as a beautiful liar — fluent, confident, and at any moment willing to be talked into the wrong thing by a sufficiently clever input. Its output is **untrusted**. Every public interface that crosses the deterministic boundary — `Verifier`, `Tool`, `Policy`, `Redactor` — is in scope for misuse-resistance review. If you can make one of them pass something it should have refused, that is a bug we want to hear about.
 
-The framework treats the **device** and the **host process** as trusted. We do not protect against an attacker who can already execute arbitrary code in the app's process; we treat that as a defense-in-depth concern of the embedding application.
+The framework treats the **device** and the **host process** as trusted. We do not protect against an attacker who can already execute arbitrary code inside the app's process; that is a defense-in-depth concern of the embedding application, not this library's perimeter.

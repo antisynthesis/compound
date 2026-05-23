@@ -1,10 +1,10 @@
 # Getting Started
 
-Build a verified, observable language-model system on iOS, iPadOS, macOS, or visionOS, entirely on-device.
+Build a verified, observable language-model system on iOS, iPadOS, macOS, or visionOS — entirely on-device, nothing leaving the machine.
 
 ## Overview
 
-A Compound session bundles the six layers of the pattern into one configurable surface. In the smallest useful form you provide a context assembler, an output verifier, and a tracer; everything else has sensible defaults.
+A Compound session bundles the six layers of the pattern into one configurable surface. In the smallest useful form you provide a context assembler, an output verifier, and a tracer; everything else has sensible defaults. There is no API key to manage, no per-token meter ticking against you, no third party reading over your user's shoulder.
 
 ## A minimal session
 
@@ -59,7 +59,7 @@ Cancellation propagates: cancel the run's task to abort the underlying producer.
 
 ## Adding tools
 
-Tools are deterministic actions the model can request. Compound wraps every tool in a ``VerifiedTool`` so every invocation passes a policy check and argument verifiers before execution.
+Tools are deterministic actions the model can request — the moment the model could reach into the world. Compound never lets it reach unguarded: every tool is wrapped in a ``VerifiedTool`` so every invocation passes a policy check and argument verifiers before execution. The model asks. The system decides.
 
 ```swift
 var registry = ToolRegistry()
@@ -104,7 +104,7 @@ let chain = VerifierChain(name: "output", [
 
 ## Eval your wiring
 
-Before shipping a change, run it through an eval suite:
+Shipping on vibes is how regressions get past you. Before shipping a change, run it through an eval suite — measure, or you are guessing:
 
 ```swift
 let suite = EvalSuite(name: "smoke", cases: [

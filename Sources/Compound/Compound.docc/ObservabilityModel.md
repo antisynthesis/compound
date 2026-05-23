@@ -4,7 +4,7 @@ How Compound separates structured tracing from live progress, where redaction si
 
 ## Overview
 
-Compound separates two observability surfaces. ``Tracer`` and ``TraceEvent`` capture the structured-log record of a run: every model call, every tool invocation, every verifier verdict, every control-loop decision, with enough fidelity to reconstruct the run after the fact. ``ProgressReporter`` and ``ProgressEvent`` are the high-frequency, UI-facing signal a SwiftUI view binds to. Both surfaces run in parallel; neither replaces the other.
+A system you cannot inspect is a system you cannot trust. Nothing happens off the books. Compound separates two observability surfaces. ``Tracer`` and ``TraceEvent`` capture the structured-log record of a run — every model call, every tool invocation, every verifier verdict, every control-loop decision — with enough fidelity to reconstruct what happened after the fact. ``ProgressReporter`` and ``ProgressEvent`` are the high-frequency, UI-facing signal a SwiftUI view binds to. Both surfaces run in parallel; neither replaces the other.
 
 ## Tracer composition
 
@@ -21,7 +21,7 @@ Tracers compose. ``CompositeTracer`` fans events out to its members in parallel 
 
 ## RedactingTracer
 
-``RedactingTracer`` wraps any tracer and runs reject reasons, diagnostic messages, and tool names through a chain of ``Redactor`` instances before they reach the inner tracer. The pattern is straightforward:
+A trace that records a secret is a secret. ``RedactingTracer`` wraps any tracer and runs reject reasons, diagnostic messages, and tool names through a chain of ``Redactor`` instances before they reach the inner tracer. The pattern is straightforward:
 
 ```swift
 let tracer = RedactingTracer(

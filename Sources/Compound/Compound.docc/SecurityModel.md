@@ -4,11 +4,11 @@ The deterministic perimeter Compound applies to model output, tool arguments, fi
 
 ## Overview
 
-Compound treats the model as an untrusted proposer. The perimeter that gates what reaches the device, the network, or the file system lives in deterministic Swift code: schemes are allow-listed, hosts are resolved before they are fetched, paths are canonicalized before they are matched, shell commands are tokenized before they are checked, regex patterns are bounded, and JSON inputs run against depth and node budgets. The framework does not rely on the model declining to misbehave.
+Compound assumes the model will try to misbehave — not out of malice, but because a fluent system that has read most of the internet can be talked into anything by a sufficiently clever input. So the perimeter that gates what reaches the device, the network, or the file system lives in deterministic Swift code, never in the prompt: schemes are allow-listed, hosts are resolved before they are fetched, paths are canonicalized before they are matched, shell commands are tokenized before they are checked, regex patterns are bounded, JSON inputs run against depth and node budgets. The framework does not rely on the model declining to misbehave. It refuses to give it the option.
 
 ## URL and host gating
 
-``URLSafetyVerifier`` is the first gate for any URL-shaped argument. It runs scheme allow-listing (HTTPS by default), host allow/block lists, and IP canonicalization.
+A URL is the easiest piece of text to weaponize and the hardest to sanitize after the fact. ``URLSafetyVerifier`` is the first gate for any URL-shaped argument. It runs scheme allow-listing (HTTPS by default), host allow/block lists, and IP canonicalization — the model is not the thing that decides whether a URL is safe.
 
 IP canonicalization goes through `inet_pton` for both IPv4 and IPv6 so that octal (`0177.0.0.1`), hex (`0x7f.0.0.1`), decimal-integer (`2130706433`), IPv4-mapped IPv6 (`::ffff:127.0.0.1`), CGNAT, NAT64, Teredo, ULA, link-local, and loopback all collapse to the same blocked space. The AWS metadata IP `169.254.169.254` is blocked by default. Non-ASCII hostnames are rejected outright to short-circuit IDN homograph attempts.
 
@@ -28,7 +28,7 @@ IP canonicalization goes through `inet_pton` for both IPv4 and IPv6 so that octa
 
 ## Trace redaction
 
-``RedactingTracer`` is a decorator that wraps any ``Tracer`` and runs reject reasons, diagnostic messages, and tool names through a chain of ``Redactor`` instances before they reach the inner tracer. The intended pattern is `RedactingTracer(inner: JSONLTracer(...), redactors: [...])` so persisted traces never carry raw secrets. ``OSLogTracer/PrivacyLevel`` controls whether free-form fields are marked `.private` to the unified log; the default is `.balanced`.
+A trace that records a secret is a secret. ``RedactingTracer`` is a decorator that wraps any ``Tracer`` and runs reject reasons, diagnostic messages, and tool names through a chain of ``Redactor`` instances before they reach the inner tracer. The intended pattern is `RedactingTracer(inner: JSONLTracer(...), redactors: [...])` so persisted traces never carry raw credentials. ``OSLogTracer/PrivacyLevel`` controls whether free-form fields are marked `.private` to the unified log; the default is `.balanced`.
 
 ## Sanitized child process environment
 

@@ -4,9 +4,9 @@ Build production compound AI systems in Swift over Apple's on-device language mo
 
 ## Overview
 
-The Compound AI Systems pattern composes a stochastic component (a large language model) with a constellation of deterministic components (retrievers, verifiers, typed tools, observability, governance) such that overall system behavior is governed by the deterministic layer rather than by the model alone. The pattern treats the model as a powerful but unreliable proposer and treats the surrounding system as the authoritative disposer. Quality, safety, and auditability arise from the composition; they are not extracted from the model in isolation.
+A language model is a beautiful liar — fluent, confident, wrong on its own schedule. The Compound AI Systems pattern is the architectural admission of that: a stochastic component (the model) wired into a constellation of deterministic components (retrievers, verifiers, typed tools, observability, governance) so that overall system behavior is governed by the part that does not lie. The model proposes; the system disposes. Quality, safety, and auditability come from the composition. They are not extracted from the model in isolation.
 
-Compound implements that pattern as a Swift package targeting Apple platforms. The stochastic core is Apple's on-device `SystemLanguageModel`, accessed through `FoundationModels`. There is no external LLM dependency, no API key, and no per-token cost.
+Compound implements that pattern as a Swift package targeting Apple platforms. The stochastic core is Apple's on-device `SystemLanguageModel`, accessed through `FoundationModels`. There is no external LLM dependency, no API key to leak, no per-token meter ticking against you, no third party reading over your user's shoulder.
 
 ## Topics
 

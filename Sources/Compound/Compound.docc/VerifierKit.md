@@ -4,9 +4,9 @@ The deterministic disposers shipped with Compound, organized by what they gate.
 
 ## Overview
 
-A ``Verifier`` is a deterministic function from a model output (plus context) to a ``Verdict``. The system's reliability bound is the verifier's reliability bound, so verifiers are first-class with their own protocol, cost metadata, and chain composition. Verifiers in a ``VerifierChain`` run cheapest-first and short-circuit on the first non-pass.
+Verifiers are the part of the system that does not negotiate with the model's confidence. Each one is a deterministic function from a model output (plus context) to a ``Verdict``, and the system's reliability is bounded by theirs — no further. That is why they are first-class here, with their own protocol, cost metadata, and chain composition. Verifiers in a ``VerifierChain`` run cheapest-first and short-circuit on the first non-pass: ask the cheap, certain questions first, stop the moment something fails.
 
-The cardinal rule: a verifier must be more reliable than the model on the property being checked, otherwise it adds nothing and may add false confidence. A verifier that itself depends on a model judging another model's output is not a verifier — it is a second sample.
+The cardinal rule, non-negotiable: a verifier must be more reliable than the model on the property being checked, or it is worse than no check at all — it manufactures false confidence. A verifier that uses a model to judge another model's output is not a verifier. It is a second sample dressed as a guard.
 
 ## Edit flow
 
@@ -123,9 +123,9 @@ Configurable rule list and rejection mode (`.reject` default, `.repair` optional
 
 ## Building your own
 
-Verifiers should be:
+A verifier is a precise instrument built for a specific failure. Generic safety gestures will not help you. The ones that work obey four rules:
 
-1. Deterministic. Two calls on the same input must return the same verdict.
-2. Cheaper than the failure they prevent. A 100ms verifier that prevents a 10-second tool call is excellent. A 10-second verifier that prevents a 100ms one is a regression.
-3. Independent of the model. A verifier that uses a model to judge another model's output is not a verifier — it is a second sample.
-4. Coverage-aware. A verifier that catches the errors you tested for and not the errors you did not is indistinguishable from a working verifier until production.
+1. Deterministic. Two calls on the same input return the same verdict — or it is not a verifier, it is a coin.
+2. Cheaper than the failure it prevents. A 100ms verifier that prevents a 10-second tool call is excellent. A 10-second verifier that prevents a 100ms one is a regression you will eventually have to remove.
+3. Independent of the model. A verifier that uses a model to judge another model's output is not a verifier; it is a second sample with extra steps and a worse failure mode.
+4. Coverage-aware. A verifier that catches the errors you tested for and not the errors you didn't is indistinguishable from a working verifier — until production. Test the negative cases.

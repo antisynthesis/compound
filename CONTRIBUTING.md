@@ -1,6 +1,6 @@
 # Contributing to Compound
 
-Thank you for taking the time to contribute. This document explains the workflow for filing issues, proposing changes, and getting them merged.
+Compound is built as a precise instrument, not a kitchen sink. Contributions are welcome — and held to that standard. This document explains the workflow for filing issues, proposing changes, and getting them merged.
 
 ## Code of conduct
 
@@ -8,7 +8,7 @@ By participating in this project you agree to abide by the [Contributor Covenant
 
 ## Discussion before code
 
-For non-trivial changes — new layers, new verifier categories, breaking API edits, dependencies — open an issue first to discuss the design. The framework deliberately keeps a small public API surface; new public types raise the bar.
+For non-trivial changes — new layers, new verifier categories, breaking API edits, dependencies — open an issue first to discuss the design. The public API surface is deliberately small; every new public type is a promise we have to keep forever, so the bar to add one is high. "We might need it later" is not a reason. Show the specific reality that requires it.
 
 ## Workflow
 
@@ -62,14 +62,14 @@ All tests must pass before a PR is merged. Don't commit failing tests with a "I'
 
 ## Verifier contributions
 
-A new verifier is the most common contribution. Each one must:
+A new verifier is the most common contribution — and a verifier is a load-bearing part of the system, not a stylistic choice. Each one must:
 
 1. Live in `Sources/Compound/Verifiers/`.
-2. Conform to `Verifier<Input>` with a `cost` matching the realistic ladder rung.
-3. Be **deterministic**. Two calls on the same input must return the same verdict.
-4. Be **cheaper than the failure it prevents**.
-5. Be **independent of the model**. A verifier that uses a model to judge another model's output is not a verifier — it is a second sample, and PRs framing it as a verifier will be sent back.
-6. Ship with tests that cover the positive case, at least one failure mode per code path, and edge cases (empty input, very long input, mixed content).
+2. Conform to `Verifier<Input>` with a `cost` matching the realistic ladder rung. Lying about cost breaks chain ordering for everyone.
+3. Be **deterministic**. Two calls on the same input must return the same verdict — or it is a coin, not a verifier.
+4. Be **cheaper than the failure it prevents**. A 10-second verifier guarding a 100ms call is a regression.
+5. Be **independent of the model**. A verifier that uses a model to judge another model's output is not a verifier — it is a second sample dressed as a guard, and PRs framing it as a verifier will be sent back.
+6. Ship with tests that cover the positive case, at least one failure mode per code path, and edge cases (empty input, very long input, mixed content). Coverage you didn't test is indistinguishable from coverage that doesn't exist.
 
 ## Documentation
 
