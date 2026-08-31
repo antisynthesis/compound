@@ -200,6 +200,47 @@ public struct EvalReport: Sendable, Codable {
         return try encoder.encode(self)
     }
 
+    /// Returns a copy with every wall-clock-dependent field neutralized:
+    /// ``started`` and ``finished`` collapse to the Unix epoch, each
+    /// outcome's ``CaseOutcome/runID`` becomes the all-zero UUID, and every
+    /// `elapsed` duration becomes `.zero`. Outputs, checks, prompts, case
+    /// ids, and ``environment`` are preserved verbatim.
+    ///
+    /// This is what makes a *committed* baseline reviewable. A report
+    /// encoded straight from a run differs on every field that touches a
+    /// clock or a UUID generator, so regenerating it would produce a diff
+    /// with no signal in it; normalizing first means the only lines that
+    /// move are the ones describing behavior that actually changed.
+    ///
+    /// ``environment`` is deliberately kept — a baseline should record
+    /// which OS and model availability produced it — and is equally
+    /// deliberately *not* consulted by ``EvalGate/compare(baseline:candidate:)``,
+    /// which compares only pass rates and per-case verdicts. A baseline
+    /// generated on a machine without the on-device model still gates a
+    /// run on a machine that has it.
+    public func normalizedForBaseline() -> EvalReport {
+        let epoch = Date(timeIntervalSince1970: 0)
+        let zeroID = UUID(uuid: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        return EvalReport(
+            suiteName: suiteName,
+            started: epoch,
+            finished: epoch,
+            cases: cases.map { c in
+                let result: CaseOutcome.Result
+                switch c.result {
+                case .completed(let output, let checks, _):
+                    result = .completed(output: output, checks: checks, elapsed: .zero)
+                case .errored(let reason, _):
+                    result = .errored(reason: reason, elapsed: .zero)
+                case .timedOut:
+                    result = .timedOut(elapsed: .zero)
+                }
+                return CaseOutcome(caseID: c.caseID, prompt: c.prompt, runID: zeroID, result: result)
+            },
+            environment: environment
+        )
+    }
+
     /// Decodes a report previously produced by ``jsonData(prettyPrinted:)``.
     public init(jsonData: Data) throws {
         let decoder = JSONDecoder()

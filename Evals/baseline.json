@@ -1,0 +1,1085 @@
+{
+  "cases" : [
+    {
+      "caseID" : "loop\/passes-on-first-turn",
+      "prompt" : "loop\/passes-on-first-turn",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=ok\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:output=hello\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=1\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repairs=0\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=1\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=ok\noutput=hello\nturns=1\nrepairs=0\nmodel-calls=1\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "loop\/repairs-then-passes",
+      "prompt" : "loop\/repairs-then-passes",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=ok\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:output=good\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=2\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repairs=1\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=2\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=ok\noutput=good\nturns=2\nrepairs=1\nmodel-calls=2\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "loop\/repair-prompt-is-self-contained",
+      "prompt" : "loop\/repair-prompt-is-self-contained",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=ok\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repair-prompt-has-task=true\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repair-prompt-has-failed-output=true\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repair-prompt-has-diagnostic=true\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repair-prompt-has-attempt-number=true\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=ok\noutput=good\nturns=2\nrepairs=1\nrepair-prompt-has-task=true\nrepair-prompt-has-failed-output=true\nrepair-prompt-has-diagnostic=true\nrepair-prompt-has-attempt-number=true\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "loop\/collect-all-reports-every-diagnostic",
+      "prompt" : "loop\/collect-all-reports-every-diagnostic",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=ok\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=2\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repairs=1\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repair-prompt-has-alpha=true\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repair-prompt-has-beta=true\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=ok\noutput=alpha beta\nturns=2\nrepairs=1\nrepair-prompt-has-alpha=true\nrepair-prompt-has-beta=true\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "loop\/reject-is-terminal",
+      "prompt" : "loop\/reject-is-terminal",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=rejected\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:reason=contraband\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:layer=verifier\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=1\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=rejected\nreason=contraband\nlayer=verifier\nseverity=recoverable\nmodel-calls=1\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "loop\/escalate-is-terminal",
+      "prompt" : "loop\/escalate-is-terminal",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=escalated\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:reason=needs a human\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:layer=verifier\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=1\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=escalated\nreason=needs a human\nlayer=verifier\nseverity=recoverable\nmodel-calls=1\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "budget\/turns-exhausted",
+      "prompt" : "budget\/turns-exhausted",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=budget-exhausted\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:kind=turns\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=2\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=2\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:layer=budget\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=budget-exhausted\nkind=turns\nturns=2\nrepairs=2\ntool-calls=0\nlayer=budget\nseverity=recoverable\nmodel-calls=2\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "budget\/repair-attempts-exhausted",
+      "prompt" : "budget\/repair-attempts-exhausted",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=budget-exhausted\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:kind=repairAttempts\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repairs=1\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=2\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:layer=budget\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=budget-exhausted\nkind=repairAttempts\nturns=2\nrepairs=1\ntool-calls=0\nlayer=budget\nseverity=recoverable\nmodel-calls=2\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "budget\/output-tokens-exhausted",
+      "prompt" : "budget\/output-tokens-exhausted",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=budget-exhausted\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:kind=outputTokens\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=1\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:layer=budget\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=budget-exhausted\nkind=outputTokens\nturns=1\nrepairs=0\ntool-calls=0\nlayer=budget\nseverity=recoverable\nmodel-calls=1\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "budget\/wall-clock-exhausted",
+      "prompt" : "budget\/wall-clock-exhausted",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=budget-exhausted\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:kind=wallClock\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=0\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=0\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=budget-exhausted\nkind=wallClock\nturns=0\nrepairs=0\ntool-calls=0\nlayer=budget\nseverity=recoverable\nmodel-calls=0\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "budget\/tool-calls-exhausted-between-turns",
+      "prompt" : "budget\/tool-calls-exhausted-between-turns",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=budget-exhausted\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:kind=toolCalls\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:tool-calls=3\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=0\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:layer=budget\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=budget-exhausted\nkind=toolCalls\nturns=0\nrepairs=0\ntool-calls=3\nlayer=budget\nseverity=recoverable\nmodel-calls=0\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "budget\/tool-call-meter-caps-mid-turn",
+      "prompt" : "budget\/tool-call-meter-caps-mid-turn",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=budget-exhausted\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:kind=toolCalls\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:recorded=2\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:tool-calls=2\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=budget-exhausted\nkind=toolCalls\nturns=0\nrepairs=0\ntool-calls=2\nlayer=budget\nseverity=recoverable\nrecorded=2\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "model\/rate-limit-retries-inside-one-turn",
+      "prompt" : "model\/rate-limit-retries-inside-one-turn",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=ok\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:output=recovered\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=2\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=1\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repairs=0\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=ok\noutput=recovered\nturns=1\nrepairs=0\nmodel-calls=2\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "model\/guardrail-violation-is-terminal",
+      "prompt" : "model\/guardrail-violation-is-terminal",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=error\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:layer=model\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:severity=terminal\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:guardrail violation: blocked"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=1\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=error\ndetail=guardrail violation: blocked\nlayer=model\nseverity=terminal\nmodel-calls=1\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "model\/context-window-exceeded-surfaces-typed",
+      "prompt" : "model\/context-window-exceeded-surfaces-typed",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=error\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:layer=model\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:severity=recoverable\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:context window exceeded (prompt tokens: 9001)"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=1\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=error\ndetail=context window exceeded (prompt tokens: 9001)\nlayer=model\nseverity=recoverable\nmodel-calls=1\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/shell-allowlist-rejects-command-substitution",
+      "prompt" : "gate\/shell-allowlist-rejects-command-substitution",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:verdict=reject\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "not-contains:verdict=pass"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "verifier=shell-allowlist\nverdict=reject\nreason=command 'rm' is not in the allowlist\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/shell-danger-rejects-rm-rf-root",
+      "prompt" : "gate\/shell-danger-rejects-rm-rf-root",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:verdict=reject\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:rm-rf-broad"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "verifier=shell-danger\nverdict=reject\nreason=dangerous pattern 'rm-rf-broad': rm -rf on a broad target\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/shell-danger-rejects-curl-pipe-shell",
+      "prompt" : "gate\/shell-danger-rejects-curl-pipe-shell",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:verdict=reject\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:fetched content"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "verifier=shell-danger\nverdict=reject\nreason=piping fetched content directly to a shell\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/shell-allowlist-admits-safe-command",
+      "prompt" : "gate\/shell-allowlist-admits-safe-command",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:verdict=pass\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "verifier=shell-allowlist\nverdict=pass\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/sql-rejects-multiple-statements",
+      "prompt" : "gate\/sql-rejects-multiple-statements",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:verdict=reject\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:multiple SQL statements"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "verifier=sql-safety\nverdict=reject\nreason=multiple SQL statements not allowed (2 seen)\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/sql-rejects-cte-wrapped-delete",
+      "prompt" : "gate\/sql-rejects-cte-wrapped-delete",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:verdict=reject\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:'delete'"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "verifier=sql-safety\nverdict=reject\nreason=SQL statement 'delete' is not in the allow-list [\"explain\", \"select\", \"with\"]\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/sql-rejects-unbounded-delete",
+      "prompt" : "gate\/sql-rejects-unbounded-delete",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:verdict=reject\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:DELETE without WHERE"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "verifier=sql-safety\nverdict=reject\nreason=DELETE without WHERE\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/sql-admits-read-only-select",
+      "prompt" : "gate\/sql-admits-read-only-select",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:verdict=pass\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "verifier=sql-safety\nverdict=pass\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/secrets-rejects-aws-access-key",
+      "prompt" : "gate\/secrets-rejects-aws-access-key",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:verdict=reject\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:aws-access-key"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "verifier=secrets\nverdict=reject\nreason=output contains secret-like content: aws-access-key\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "gate\/loop-refuses-unsafe-shell-proposal",
+      "prompt" : "gate\/loop-refuses-unsafe-shell-proposal",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=rejected\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:layer=verifier\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:rm-rf-broad"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=1\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=rejected\nreason=dangerous pattern 'rm-rf-broad': rm -rf on a broad target\nlayer=verifier\nseverity=recoverable\nmodel-calls=1\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "redaction\/scrubs-secret-from-user-prompt",
+      "prompt" : "redaction\/scrubs-secret-from-user-prompt",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "not-contains:AKIAIOSFODNN7EXAMPLE"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:redactions-applied=aws-key\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:prompt-has-placeholder=true\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "redactions-applied=aws-key\nprompt-has-secret=false\nprompt-has-placeholder=true\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "redaction\/scrubs-retrieved-sources-by-default",
+      "prompt" : "redaction\/scrubs-retrieved-sources-by-default",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "not-contains:AKIAIOSFODNN7EXAMPLE"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:source-has-secret=false\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "source-has-secret=false\nprompt-has-secret=false\nredactions-applied=aws-key\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "redaction\/scope-narrowed-to-user-prompt-spares-sources",
+      "prompt" : "redaction\/scope-narrowed-to-user-prompt-spares-sources",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:source-has-secret=true\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:prompt-user-line-has-secret=false\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "source-has-secret=true\nprompt-user-line-has-secret=false\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "redaction\/prompt-frame-defuses-injected-fence",
+      "prompt" : "redaction\/prompt-frame-defuses-injected-fence",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:escaped-fence=true\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:literal-source-closers=1\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:has-data-not-instructions-notice=true\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "escaped-fence=true\nliteral-source-closers=1\nhas-data-not-instructions-notice=true\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "typed\/reason-then-extract-runs-both-phases",
+      "prompt" : "typed\/reason-then-extract-runs-both-phases",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=ok\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:value=ticket(title=login bug, priority=2)\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:reasoning=The login bug is urgent: priority 2.\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=2\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=1\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=ok\nvalue=ticket(title=login bug, priority=2)\nreasoning=The login bug is urgent: priority 2.\nturns=2\nrepairs=0\nmodel-calls=1\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "typed\/direct-mode-skips-the-reasoning-turn",
+      "prompt" : "typed\/direct-mode-skips-the-reasoning-turn",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=ok\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:reasoning=none\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=1\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:model-calls=0\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=ok\nvalue=ticket(title=urgent: cannot log in, priority=1)\nreasoning=none\nturns=1\nrepairs=0\nmodel-calls=0\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "caseID" : "typed\/verifier-repair-re-extracts",
+      "prompt" : "typed\/verifier-repair-re-extracts",
+      "result" : {
+        "checks" : [
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:outcome=ok\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:value=ticket(title=login bug, priority=3)\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repairs=1\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:turns=2\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repair-prompt-has-rendered-value=true\n"
+          },
+          {
+            "check" : {
+              "passed" : true
+            },
+            "name" : "contains:repair-prompt-has-diagnostic=true\n"
+          }
+        ],
+        "elapsedNanoseconds" : 0,
+        "kind" : "completed",
+        "output" : "outcome=ok\nvalue=ticket(title=login bug, priority=3)\nreasoning=none\nturns=2\nrepairs=1\nrepair-prompt-has-rendered-value=true\nrepair-prompt-has-diagnostic=true\n"
+      },
+      "runID" : "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "environment" : {
+    "modelAvailability" : "available",
+    "osVersion" : "Version 27.0 (Build 26A5388g)"
+  },
+  "finished" : "1970-01-01T00:00:00Z",
+  "started" : "1970-01-01T00:00:00Z",
+  "suiteName" : "compound-golden"
+}

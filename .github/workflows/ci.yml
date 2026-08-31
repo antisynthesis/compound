@@ -29,5 +29,79 @@ jobs:
       - name: Build
         run: swift build -c debug
 
+      # Includes the golden eval gate (Tests/CompoundTests/GoldenGateTests.swift),
+      # which replays the golden suite against fakes and compares the result
+      # to the committed baseline at Evals/baseline.json. Everything in the
+      # suite runs off-device: a runner without Apple Intelligence still
+      # gates. To adopt a deliberate behavior change, regenerate with
+      # `REGENERATE_EVAL_BASELINE=1 swift test --filter GoldenGate` and commit
+      # the baseline diff.
       - name: Run tests
         run: swift test -c debug
+
+  examples:
+    name: Compile examples (macOS)
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Show toolchain
+        run: swift --version
+
+      # The examples are standalone `main.swift` files rather than package
+      # targets, because they use the @Generable / @Model macros whose
+      # compiler plugins ship only with full Xcode. Adding them as targets
+      # would make `swift build` depend on those plugins; type-checking them
+      # against the built module keeps the package's build graph unchanged
+      # while still catching an example that a source change has broken.
+      - name: Build the library
+        run: swift build -c debug
+
+      - name: Type-check every example
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$(uname -m)-apple-macos26.0"
+          count=0
+          while IFS= read -r f; do
+            echo "==> $f"
+            # -parse-as-library: the files are named main.swift but declare
+            # @main types, which top-level-code mode rejects.
+            xcrun swiftc -typecheck -swift-version 6 -parse-as-library \
+              -target "$target" -I .build/debug "$f"
+            count=$((count + 1))
+          done < <(find Examples -name '*.swift' | sort)
+          if [ "$count" -eq 0 ]; then
+            echo "no example sources found under Examples/ — check the path" >&2
+            exit 1
+          fi
+          echo "type-checked $count example file(s)"
+
+  api-diff:
+    name: API breakage report (informational)
+    runs-on: macos-26
+    # Advisory only: Compound is pre-1.0, so an intentional API break is a
+    # normal change. This job surfaces what moved for the reviewer; it never
+    # blocks the merge.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Tags and full history are required to diff against a release.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Diagnose API-breaking changes since the latest tag
+        shell: bash
+        run: |
+          set -uo pipefail
+          latest=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$latest" ]; then
+            echo "No tags in this repository yet — nothing to diff against."
+            echo "This step becomes meaningful once a release is tagged."
+            exit 0
+          fi
+          echo "Comparing the public API against $latest"
+          swift package diagnose-api-breaking-changes "$latest"
