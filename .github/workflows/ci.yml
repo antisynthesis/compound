@@ -29,13 +29,27 @@ jobs:
       - name: Build
         run: swift build -c debug
 
-      # Includes the golden eval gate (Tests/CompoundTests/GoldenGateTests.swift),
-      # which replays the golden suite against fakes and compares the result
-      # to the committed baseline at Evals/baseline.json. Everything in the
-      # suite runs off-device: a runner without Apple Intelligence still
-      # gates. To adopt a deliberate behavior change, regenerate with
-      # `REGENERATE_EVAL_BASELINE=1 swift test --filter GoldenGate` and commit
-      # the baseline diff.
+      # Includes two eval gates. Both replay their suite against fakes and
+      # compare the result to a committed baseline. Everything runs
+      # off-device: a runner without Apple Intelligence still gates.
+      #
+      #   1. Golden gate — Tests/CompoundTests/GoldenGateTests.swift against
+      #      Evals/baseline.json, at pass rate 1.0 with tolerance 0.0.
+      #      Regenerate with:
+      #        REGENERATE_EVAL_BASELINE=1 swift test --filter GoldenGate
+      #
+      #   2. Memory gate — Tests/CompoundTests/MemoryGoldenGateTests.swift
+      #      against Evals/memory-baseline.json, at pass rate 0.75 with
+      #      tolerance 0.0. The threshold is below 1.0 on purpose: the
+      #      suite deliberately carries adversarial families (identifier
+      #      obfuscation, cross-lingual aliases) that deterministic systems
+      #      are known to fail, and the committed baseline records one such
+      #      failure today. Tolerance 0.0 is what stops those documented
+      #      gaps from widening silently. Regenerate with:
+      #        REGENERATE_MEMORY_BASELINE=1 swift test --filter MemoryGoldenGate
+      #
+      # In both cases, regenerate only to adopt a deliberate behavior
+      # change, and commit the baseline diff so a reviewer sees what moved.
       - name: Run tests
         run: swift test -c debug
 

@@ -1,0 +1,389 @@
+{
+  "cases" : [
+    {
+      "caseID" : "supersession\/residence",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "where do I live now",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "6be0eac050537a5ffcc4e78556fa4f19",
+        "6c36871e3b93b2369025ae7613b04827",
+        "657c1948dfe896c3b0a5bfd108788702",
+        "9ababd675e88d1c0e6b65162785b564d"
+      ],
+      "tags" : [
+        "supersession"
+      ]
+    },
+    {
+      "caseID" : "drift\/job-title-chain",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "what is my job title",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "6be0eac050537a5ffcc4e78556fa4f19",
+        "6c36871e3b93b2369025ae7613b04827",
+        "145fc9d8d019b216aedbdc64cd5b04d3",
+        "9ababd675e88d1c0e6b65162785b564d"
+      ],
+      "tags" : [
+        "drift"
+      ]
+    },
+    {
+      "caseID" : "decay\/expired-link-drops-out",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "review meeting link meet example",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "31a8057f1126c8b4ef70c207628c7735",
+        "71001a1e433b38275611ce9f3186f3d3",
+        "657c1948dfe896c3b0a5bfd108788702",
+        "9ababd675e88d1c0e6b65162785b564d",
+        "6be0eac050537a5ffcc4e78556fa4f19"
+      ],
+      "tags" : [
+        "decay"
+      ]
+    },
+    {
+      "caseID" : "amnesia\/forgotten-project-is-gone",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "what happened to the Kestrel migration",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "71001a1e433b38275611ce9f3186f3d3",
+        "6c36871e3b93b2369025ae7613b04827",
+        "657c1948dfe896c3b0a5bfd108788702",
+        "6be0eac050537a5ffcc4e78556fa4f19"
+      ],
+      "tags" : [
+        "amnesia"
+      ]
+    },
+    {
+      "caseID" : "amnesia\/sibling-project-survives",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "who reviews the Borealis release notes",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "142e80723b343d05ba7532bc3164b0de",
+        "0052e90dfdd1965c8291712287246ef5",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "145fc9d8d019b216aedbdc64cd5b04d3",
+        "9ababd675e88d1c0e6b65162785b564d",
+        "6c36871e3b93b2369025ae7613b04827",
+        "6be0eac050537a5ffcc4e78556fa4f19"
+      ],
+      "tags" : [
+        "amnesia"
+      ]
+    },
+    {
+      "caseID" : "purge\/billing-identifier-erased",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "which billing account covers the Borealis compute spend",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "142e80723b343d05ba7532bc3164b0de",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "657c1948dfe896c3b0a5bfd108788702",
+        "6c36871e3b93b2369025ae7613b04827",
+        "145fc9d8d019b216aedbdc64cd5b04d3",
+        "9ababd675e88d1c0e6b65162785b564d"
+      ],
+      "tags" : [
+        "purge"
+      ]
+    },
+    {
+      "caseID" : "purge\/erased-after-fanout-retry",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "acct-77219 compute spend billing",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "e825e760c543c0e400d927163bfeac27",
+        "657c1948dfe896c3b0a5bfd108788702",
+        "71001a1e433b38275611ce9f3186f3d3",
+        "6c36871e3b93b2369025ae7613b04827",
+        "6be0eac050537a5ffcc4e78556fa4f19"
+      ],
+      "tags" : [
+        "purge"
+      ]
+    },
+    {
+      "caseID" : "prefix-collision\/sibling-account-survives",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "which account ran the retired sandbox",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "657c1948dfe896c3b0a5bfd108788702",
+        "145fc9d8d019b216aedbdc64cd5b04d3",
+        "9ababd675e88d1c0e6b65162785b564d",
+        "6c36871e3b93b2369025ae7613b04827"
+      ],
+      "tags" : [
+        "prefix-collision"
+      ]
+    },
+    {
+      "caseID" : "obfuscation\/cross-lingual-alias-survives-amnesia",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+        "kestrel-migration wurde"
+      ],
+      "missing" : [
+
+      ],
+      "passed" : false,
+      "query" : "Kestrel Migration Lieferantenpruefung",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "71001a1e433b38275611ce9f3186f3d3",
+        "6be0eac050537a5ffcc4e78556fa4f19",
+        "657c1948dfe896c3b0a5bfd108788702",
+        "6c36871e3b93b2369025ae7613b04827"
+      ],
+      "tags" : [
+        "obfuscation"
+      ]
+    },
+    {
+      "caseID" : "fact-recall\/name-from-first-turn",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "what is my name",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "6be0eac050537a5ffcc4e78556fa4f19",
+        "6c36871e3b93b2369025ae7613b04827",
+        "145fc9d8d019b216aedbdc64cd5b04d3",
+        "9ababd675e88d1c0e6b65162785b564d"
+      ],
+      "tags" : [
+        "fact-recall"
+      ]
+    },
+    {
+      "caseID" : "fact-recall\/constraint-from-first-turn",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "do I have any dietary constraints",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "6be0eac050537a5ffcc4e78556fa4f19",
+        "657c1948dfe896c3b0a5bfd108788702",
+        "71001a1e433b38275611ce9f3186f3d3",
+        "6c36871e3b93b2369025ae7613b04827"
+      ],
+      "tags" : [
+        "fact-recall"
+      ]
+    },
+    {
+      "caseID" : "fact-recall\/archived-retrospective-date",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "when is the Borealis retrospective scheduled",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "142e80723b343d05ba7532bc3164b0de",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "6c36871e3b93b2369025ae7613b04827",
+        "145fc9d8d019b216aedbdc64cd5b04d3",
+        "9ababd675e88d1c0e6b65162785b564d",
+        "657c1948dfe896c3b0a5bfd108788702"
+      ],
+      "tags" : [
+        "fact-recall"
+      ]
+    },
+    {
+      "caseID" : "fact-recall\/archived-round-carries-provenance",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "where does the Borealis release checklist live",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "142e80723b343d05ba7532bc3164b0de",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "9ababd675e88d1c0e6b65162785b564d",
+        "145fc9d8d019b216aedbdc64cd5b04d3",
+        "6c36871e3b93b2369025ae7613b04827",
+        "6be0eac050537a5ffcc4e78556fa4f19"
+      ],
+      "tags" : [
+        "fact-recall",
+        "provenance"
+      ]
+    },
+    {
+      "caseID" : "contradiction-update\/desk-phone",
+      "elapsedNanoseconds" : 0,
+      "forbidden" : [
+
+      ],
+      "missing" : [
+
+      ],
+      "passed" : true,
+      "query" : "what is my desk phone number",
+      "retrievedIDs" : [
+        "abb5f3b92cf0d909df86071dc1b03cc1",
+        "cabd11c4eaa6103a04217b9f94c081e1",
+        "0052e90dfdd1965c8291712287246ef5",
+        "d9a366434d0b6e2981df1ce902abf699",
+        "142e80723b343d05ba7532bc3164b0de",
+        "6be0eac050537a5ffcc4e78556fa4f19",
+        "6c36871e3b93b2369025ae7613b04827",
+        "145fc9d8d019b216aedbdc64cd5b04d3",
+        "9ababd675e88d1c0e6b65162785b564d"
+      ],
+      "tags" : [
+        "contradiction-update"
+      ]
+    }
+  ],
+  "environment" : {
+    "modelAvailability" : "available",
+    "osVersion" : "Version 27.0 (Build 26A5388g)"
+  },
+  "finished" : "1970-01-01T00:00:00Z",
+  "provenance" : {
+    "embedder" : "fixture.hash-bag.v1(dim=32)",
+    "extractor" : "fixture.seeded.v1",
+    "modelAvailability" : "available",
+    "promptVersion" : "none",
+    "reconciler" : "deterministic.v1"
+  },
+  "runID" : "00000000-0000-0000-0000-000000000000",
+  "started" : "1970-01-01T00:00:00Z",
+  "suiteName" : "compound-memory",
+  "writePath" : {
+    "modelCalls" : 0,
+    "promptTokens" : 0,
+    "wallClockNanoseconds" : 0
+  }
+}
