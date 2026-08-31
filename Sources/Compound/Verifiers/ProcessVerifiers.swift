@@ -54,7 +54,15 @@ public struct SwiftCommandVerifier: Verifier {
             timeout: timeout
         )
         if result.timedOut {
-            return .repair(Diagnostic(verifier: name, message: "process timed out"))
+            // Surface any partial output captured before the process was
+            // killed, so the model has compiler diagnostics to repair
+            // against even when the invocation ran out of time.
+            let partial = result.stderr.isEmpty ? result.stdout : result.stderr
+            return .repair(Diagnostic(
+                verifier: name,
+                message: "process timed out",
+                suggestion: partial.isEmpty ? nil : Self.truncate(partial, to: outputBudget)
+            ))
         }
         if result.exitCode == 0 {
             return .pass
@@ -152,7 +160,12 @@ public struct SwiftSnippetTypecheckVerifier: Verifier {
             timeout: timeout
         )
         if result.timedOut {
-            return .repair(Diagnostic(verifier: name, message: "typecheck timed out"))
+            let partial = result.stderr.isEmpty ? result.stdout : result.stderr
+            return .repair(Diagnostic(
+                verifier: name,
+                message: "typecheck timed out",
+                suggestion: partial.isEmpty ? nil : SwiftCommandVerifier.truncate(partial, to: outputBudget)
+            ))
         }
         if result.exitCode == 0 {
             return .pass
