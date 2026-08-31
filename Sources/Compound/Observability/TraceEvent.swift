@@ -94,6 +94,40 @@ public enum TraceEvent: Sendable, Equatable, Codable {
     /// and `sources` describe the evidence handed to the inner assembler.
     case retrievalLoopEnded(runID: UUID, rounds: Int, sources: Int, reason: String)
 
+    /// One memory consolidation pass finished for a single turn.
+    ///
+    /// This is the one memory event that earns a dedicated case. The
+    /// memory literature's blind spot is write-path cost, not retrieval
+    /// latency: MemDelta and the small-model results both measure recall
+    /// while leaving "what did remembering cost" unreported, and on
+    /// device that is the number that decides whether a memory layer can
+    /// ship at all — model calls per turn and background wall-clock, not
+    /// milliseconds saved at read time. Those are structured integer
+    /// fields that have to be summed, averaged, and compared across
+    /// builds; a free-form ``info(runID:category:message:)`` string
+    /// cannot be aggregated without a log parser, so this case pays for
+    /// itself.
+    ///
+    /// Everything else the memory layer reports — recall, purge, decay,
+    /// eviction, candidate rejection — stays on `.info` with category
+    /// `"memory"` and the fixed `key=value` message grammar documented on
+    /// ``MemoryTrace``, so a scraper has one contract and ``TraceEvent``
+    /// does not grow a case per memory operation.
+    ///
+    /// `modelCalls` counts calls actually issued, so a fully
+    /// deterministic configuration reports `0` and a regression that
+    /// silently starts calling the model is visible in the trace.
+    case memoryConsolidated(
+        runID: UUID,
+        extracted: Int,
+        added: Int,
+        updated: Int,
+        deleted: Int,
+        archived: Int,
+        modelCalls: Int,
+        elapsed: Duration
+    )
+
     /// The control loop scheduled a repair turn from a `.repair` verdict.
     case repairScheduled(runID: UUID, attempt: Int, diagnostic: Diagnostic)
     /// A budget dimension was exhausted.
@@ -129,6 +163,7 @@ public enum TraceEvent: Sendable, Equatable, Codable {
              .routingEscalated(let id, _, _, _),
              .retrievalRound(let id, _, _, _, _, _),
              .retrievalLoopEnded(let id, _, _, _),
+             .memoryConsolidated(let id, _, _, _, _, _, _, _),
              .repairScheduled(let id, _, _),
              .budgetExhausted(let id, _),
              .escalation(let id, _),
@@ -158,6 +193,7 @@ public enum TraceEvent: Sendable, Equatable, Codable {
         case .routingEscalated: return "routing.escalated"
         case .retrievalRound: return "retrieval.round"
         case .retrievalLoopEnded: return "retrieval.loop_ended"
+        case .memoryConsolidated: return "memory.consolidated"
         case .repairScheduled: return "repair.scheduled"
         case .budgetExhausted: return "budget.exhausted"
         case .escalation: return "escalation"
@@ -199,6 +235,16 @@ public protocol TraceEventVisitor: Sendable {
         verdict: String
     ) async
     func visitRetrievalLoopEnded(runID: UUID, rounds: Int, sources: Int, reason: String) async
+    func visitMemoryConsolidated(
+        runID: UUID,
+        extracted: Int,
+        added: Int,
+        updated: Int,
+        deleted: Int,
+        archived: Int,
+        modelCalls: Int,
+        elapsed: Duration
+    ) async
     func visitRepairScheduled(runID: UUID, attempt: Int, diagnostic: Diagnostic) async
     func visitBudgetExhausted(runID: UUID, kind: BudgetExhaustion) async
     func visitEscalation(runID: UUID, reason: String) async
@@ -231,6 +277,16 @@ public extension TraceEventVisitor {
         verdict _: String
     ) async {}
     func visitRetrievalLoopEnded(runID _: UUID, rounds _: Int, sources _: Int, reason _: String) async {}
+    func visitMemoryConsolidated(
+        runID _: UUID,
+        extracted _: Int,
+        added _: Int,
+        updated _: Int,
+        deleted _: Int,
+        archived _: Int,
+        modelCalls _: Int,
+        elapsed _: Duration
+    ) async {}
     func visitRepairScheduled(runID _: UUID, attempt _: Int, diagnostic _: Diagnostic) async {}
     func visitBudgetExhausted(runID _: UUID, kind _: BudgetExhaustion) async {}
     func visitEscalation(runID _: UUID, reason _: String) async {}
@@ -289,6 +345,17 @@ public extension TraceEvent {
             )
         case .retrievalLoopEnded(let id, let rounds, let sources, let reason):
             await visitor.visitRetrievalLoopEnded(runID: id, rounds: rounds, sources: sources, reason: reason)
+        case .memoryConsolidated(let id, let extracted, let added, let updated, let deleted, let archived, let modelCalls, let elapsed):
+            await visitor.visitMemoryConsolidated(
+                runID: id,
+                extracted: extracted,
+                added: added,
+                updated: updated,
+                deleted: deleted,
+                archived: archived,
+                modelCalls: modelCalls,
+                elapsed: elapsed
+            )
         case .repairScheduled(let id, let attempt, let diag):
             await visitor.visitRepairScheduled(runID: id, attempt: attempt, diagnostic: diag)
         case .budgetExhausted(let id, let kind):

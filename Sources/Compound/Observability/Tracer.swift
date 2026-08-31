@@ -174,6 +174,8 @@ public struct OSLogTracer: Tracer {
             logger.debug("retrieval.round run=\(id.uuidString, privacy: .public) round=\(round, privacy: .public) retrieved=\(retrieved, privacy: .public) new=\(new, privacy: .public) verdict=\(verdict, privacy: .public) query=\(query, privacy: .public)")
         case .retrievalLoopEnded(let id, let rounds, let sources, let reason):
             logger.info("retrieval.loop_ended run=\(id.uuidString, privacy: .public) rounds=\(rounds, privacy: .public) sources=\(sources, privacy: .public) reason=\(reason, privacy: .public)")
+        case .memoryConsolidated(let id, let extracted, let added, let updated, let deleted, let archived, let calls, let elapsed):
+            logger.info("memory.consolidated run=\(id.uuidString, privacy: .public) extracted=\(extracted, privacy: .public) added=\(added, privacy: .public) updated=\(updated, privacy: .public) deleted=\(deleted, privacy: .public) archived=\(archived, privacy: .public) model_calls=\(calls, privacy: .public) ms=\(Self.ms(elapsed), privacy: .public)")
         case .repairScheduled(let id, let attempt, let diag):
             logger.info("repair.scheduled run=\(id.uuidString, privacy: .public) attempt=\(attempt, privacy: .public) why=\(diag.summary, privacy: .public)")
         case .budgetExhausted(let id, let kind):
@@ -246,6 +248,11 @@ public struct OSLogTracer: Tracer {
             logger.debug("retrieval.round run=\(id.uuidString, privacy: .public) round=\(round, privacy: .public) retrieved=\(retrieved, privacy: .public) new=\(new, privacy: .public) verdict=\(verdict, privacy: .public) query=\(query, privacy: .private)")
         case .retrievalLoopEnded(let id, let rounds, let sources, let reason):
             logger.info("retrieval.loop_ended run=\(id.uuidString, privacy: .public) rounds=\(rounds, privacy: .public) sources=\(sources, privacy: .public) reason=\(reason, privacy: .public)")
+        // Counts and a duration: no free-form text, nothing user-supplied,
+        // so `.balanced` treats them exactly as `.maximal` does. Suppressing
+        // them would delete the write-path cost signal this case exists for.
+        case .memoryConsolidated(let id, let extracted, let added, let updated, let deleted, let archived, let calls, let elapsed):
+            logger.info("memory.consolidated run=\(id.uuidString, privacy: .public) extracted=\(extracted, privacy: .public) added=\(added, privacy: .public) updated=\(updated, privacy: .public) deleted=\(deleted, privacy: .public) archived=\(archived, privacy: .public) model_calls=\(calls, privacy: .public) ms=\(Self.ms(elapsed), privacy: .public)")
         case .repairScheduled(let id, let attempt, let diag):
             logger.info("repair.scheduled run=\(id.uuidString, privacy: .public) attempt=\(attempt, privacy: .public) why=\(diag.summary, privacy: .private)")
         case .budgetExhausted(let id, let kind):
@@ -296,6 +303,11 @@ public struct OSLogTracer: Tracer {
             logger.debug("retrieval.round run=\(id.uuidString, privacy: .private) round=\(round, privacy: .private) retrieved=\(retrieved, privacy: .private) new=\(new, privacy: .private) verdict=\(verdict, privacy: .private) query=\(query, privacy: .private)")
         case .retrievalLoopEnded(let id, let rounds, let sources, let reason):
             logger.info("retrieval.loop_ended run=\(id.uuidString, privacy: .private) rounds=\(rounds, privacy: .private) sources=\(sources, privacy: .private) reason=\(reason, privacy: .private)")
+        // Under `.opaque` even the counts are `.private`, but the label
+        // itself stays in the log line: the point of the level is to hide
+        // values, not to hide that the event happened.
+        case .memoryConsolidated(let id, let extracted, let added, let updated, let deleted, let archived, let calls, let elapsed):
+            logger.info("memory.consolidated run=\(id.uuidString, privacy: .private) extracted=\(extracted, privacy: .private) added=\(added, privacy: .private) updated=\(updated, privacy: .private) deleted=\(deleted, privacy: .private) archived=\(archived, privacy: .private) model_calls=\(calls, privacy: .private) ms=\(Self.ms(elapsed), privacy: .private)")
         case .repairScheduled(let id, let attempt, let diag):
             logger.info("repair.scheduled run=\(id.uuidString, privacy: .private) attempt=\(attempt, privacy: .private) why=\(diag.summary, privacy: .private)")
         case .budgetExhausted(let id, let kind):

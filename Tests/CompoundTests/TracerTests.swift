@@ -95,6 +95,39 @@ struct TracerTests {
         }
     }
 
+    @Test("metrics tracer folds memory consolidation counts into the snapshot")
+    func metricsFoldsMemoryConsolidation() async throws {
+        let tracer = MetricsCollectingTracer()
+        let runID = UUID()
+        await tracer.record(.memoryConsolidated(
+            runID: runID, extracted: 5, added: 2, updated: 1, deleted: 1,
+            archived: 3, modelCalls: 0, elapsed: .milliseconds(40)
+        ))
+        await tracer.record(.memoryConsolidated(
+            runID: runID, extracted: 1, added: 1, updated: 0, deleted: 0,
+            archived: 1, modelCalls: 2, elapsed: .milliseconds(60)
+        ))
+        let snapshot = await tracer.current()
+        #expect(snapshot.memory.consolidations == 2)
+        #expect(snapshot.memory.factsAdded == 3)
+        #expect(snapshot.memory.factsUpdated == 1)
+        #expect(snapshot.memory.factsDeleted == 1)
+        #expect(snapshot.memory.roundsArchived == 4)
+        #expect(snapshot.memory.memoryModelCalls == 2)
+        #expect(snapshot.memory.consolidationLatency.count == 2)
+        #expect(abs(snapshot.memory.consolidationLatency.averageMilliseconds - 50) < 0.001)
+        #expect(abs(snapshot.memory.averageModelCallsPerConsolidation - 1) < 0.001)
+    }
+
+    @Test("a memory-free run leaves the memory metrics zeroed")
+    func metricsMemoryZeroWithoutMemory() async throws {
+        let tracer = MetricsCollectingTracer()
+        await tracer.record(.info(runID: UUID(), category: "memory", message: "event=sweep expired=0"))
+        let snapshot = await tracer.current()
+        #expect(snapshot.memory.consolidations == 0)
+        #expect(snapshot.memory.averageModelCallsPerConsolidation == 0)
+    }
+
     @Test("composite tracer fans out concurrently")
     func compositeFansOutConcurrently() async throws {
         let a = SleepyTracer(delay: .milliseconds(150))

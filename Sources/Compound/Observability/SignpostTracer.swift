@@ -102,6 +102,12 @@ public struct SignpostTracer: Tracer {
         case .retrievalLoopEnded(let id, let rounds, let sources, let reason):
             signposter.emitEvent("retrieval.done", id: Self.runID(id),
                                  "run=\(id.uuidString, privacy: .public) rounds=\(rounds) sources=\(sources) reason=\(reason, privacy: .public)")
+        // A point event, not an interval: consolidation is reported once,
+        // after the fact, with its own measured `elapsed` — there is no
+        // paired "started" event to open an interval against.
+        case .memoryConsolidated(let id, let extracted, let added, let updated, let deleted, let archived, let calls, let elapsed):
+            signposter.emitEvent("memory.consolidated", id: Self.runID(id),
+                                 "run=\(id.uuidString, privacy: .public) extracted=\(extracted) added=\(added) updated=\(updated) deleted=\(deleted) archived=\(archived) calls=\(calls) ms=\(Self.ms(elapsed))")
         case .repairScheduled(let id, let attempt, _):
             signposter.emitEvent("repair", id: Self.runID(id),
                                  "run=\(id.uuidString, privacy: .public) attempt=\(attempt)")

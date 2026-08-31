@@ -12,7 +12,7 @@ import Testing
 /// and ``caseCount`` fails the harness until an exemplar is added.
 enum TraceExemplars {
     /// Number of cases ``TraceEvent`` declares.
-    static let caseCount = 22
+    static let caseCount = 23
 
     /// Marker seeded into every string-valued field.
     static let secret = "SEEDPII-4c1f9a"
@@ -69,6 +69,16 @@ enum TraceExemplars {
                 verdict: "insufficient missing=[\(secret)]"
             ),
             .retrievalLoopEnded(runID: runID, rounds: 3, sources: 7, reason: "sufficient"),
+            .memoryConsolidated(
+                runID: runID,
+                extracted: 5,
+                added: 2,
+                updated: 1,
+                deleted: 1,
+                archived: 3,
+                modelCalls: 0,
+                elapsed: .milliseconds(1234)
+            ),
             .repairScheduled(runID: runID, attempt: 2, diagnostic: diag),
             .budgetExhausted(runID: runID, kind: .wallClock),
             .escalation(runID: runID, reason: "needs a human \(secret)"),
@@ -98,6 +108,7 @@ enum TraceExemplars {
         case .routingEscalated: return "routingEscalated"
         case .retrievalRound: return "retrievalRound"
         case .retrievalLoopEnded: return "retrievalLoopEnded"
+        case .memoryConsolidated: return "memoryConsolidated"
         case .repairScheduled: return "repairScheduled"
         case .budgetExhausted: return "budgetExhausted"
         case .escalation: return "escalation"
@@ -151,6 +162,95 @@ struct TraceRoundTripTests {
         let json = String(decoding: try JSONEncoder().encode(event), as: UTF8.self)
         #expect(json.contains("\"type\":\"tool.completed\""))
         #expect(json.contains("\"elapsed_ns\":3000000"))
+    }
+
+    @Test("memory.consolidated keeps its label and every integer field")
+    func memoryConsolidatedWireFormat() throws {
+        let runID = UUID()
+        let event = TraceEvent.memoryConsolidated(
+            runID: runID,
+            extracted: 7,
+            added: 3,
+            updated: 2,
+            deleted: 1,
+            archived: 4,
+            modelCalls: 0,
+            elapsed: .milliseconds(1234)
+        )
+        #expect(event.label == "memory.consolidated")
+        #expect(event.wireType == "memory.consolidated")
+        let json = String(decoding: try JSONEncoder().encode(event), as: UTF8.self)
+        #expect(json.contains("\"type\":\"memory.consolidated\""))
+        #expect(json.contains("\"model_calls\":0"))
+        #expect(json.contains("\"elapsed_ns\":1234000000"))
+        let decoded = try JSONDecoder().decode(TraceEvent.self, from: Data(json.utf8))
+        guard case .memoryConsolidated(let id, let extracted, let added, let updated, let deleted, let archived, let calls, let elapsed) = decoded else {
+            Issue.record("expected .memoryConsolidated")
+            return
+        }
+        #expect(id == runID)
+        #expect(extracted == 7)
+        #expect(added == 3)
+        #expect(updated == 2)
+        #expect(deleted == 1)
+        #expect(archived == 4)
+        #expect(calls == 0)
+        #expect(elapsed == .milliseconds(1234))
+    }
+
+    @Test("an older reader decodes memory.consolidated as unknown without losing the counts")
+    func memoryConsolidatedReadsAsUnknownOnOlderBuilds() throws {
+        // The wire format is the compatibility contract: a build that
+        // predates this case must still see the label and the numbers.
+        let runID = UUID()
+        let line = """
+        {"type":"memory.consolidated.v2","run":"\(runID.uuidString)","ts":1770000000.5,\
+        "extracted":7,"added":3,"updated":2,"deleted":1,"archived":4,"model_calls":0,"elapsed_ns":1234000000}
+        """
+        let batch = TraceReader.decode(Data(line.utf8))
+        #expect(batch.skippedLines == 0)
+        guard case .unknown(let id, let label, let payload) = try #require(batch.events.first) else {
+            Issue.record("expected .unknown")
+            return
+        }
+        #expect(id == runID)
+        #expect(label == "memory.consolidated.v2")
+        #expect(payload["added"] == "3")
+        #expect(payload["model_calls"] == "0")
+    }
+
+    @Test("redacting tracer forwards memory.consolidated integers untouched")
+    func memoryConsolidatedSurvivesRedaction() async throws {
+        // RedactingTracer is structural — it round-trips through Codable
+        // and scrubs strings — so a new case must be covered the day it
+        // lands, with no edit to the redactor. Proven, not assumed.
+        let inner = InMemoryTracer()
+        let tracer = RedactingTracer(inner: inner, redactors: [BlanketRedactor()])
+        let runID = UUID()
+        await tracer.record(.memoryConsolidated(
+            runID: runID,
+            extracted: 7,
+            added: 3,
+            updated: 2,
+            deleted: 1,
+            archived: 4,
+            modelCalls: 2,
+            elapsed: .milliseconds(1234)
+        ))
+        let out = await inner.snapshot()
+        guard case .memoryConsolidated(let id, let extracted, let added, let updated, let deleted, let archived, let calls, let elapsed) = try #require(out.first) else {
+            Issue.record("blanket redaction failed the event closed")
+            return
+        }
+        #expect(id == runID)
+        #expect(out.first?.label == "memory.consolidated")
+        #expect(extracted == 7)
+        #expect(added == 3)
+        #expect(updated == 2)
+        #expect(deleted == 1)
+        #expect(archived == 4)
+        #expect(calls == 2)
+        #expect(elapsed == .milliseconds(1234))
     }
 
     @Test("trace record round-trips with its timestamp")

@@ -59,6 +59,15 @@ public actor MetricsCollectingTracer: Tracer {
             }
             snapshot.perVerifier[name] = stat
 
+        case .memoryConsolidated(_, _, let added, let updated, let deleted, let archived, let modelCalls, let elapsed):
+            snapshot.memory.consolidations += 1
+            snapshot.memory.factsAdded += added
+            snapshot.memory.factsUpdated += updated
+            snapshot.memory.factsDeleted += deleted
+            snapshot.memory.roundsArchived += archived
+            snapshot.memory.memoryModelCalls += modelCalls
+            snapshot.memory.consolidationLatency.record(elapsed)
+
         case .repairScheduled:
             snapshot.repairsScheduled += 1
         case .budgetExhausted(_, let kind):
@@ -135,8 +144,49 @@ public struct MetricsSnapshot: Sendable {
     /// Count of budget exhaustions broken down by dimension.
     public var budgetExhausted: [BudgetExhaustion: Int] = [:]
 
+    /// Write-path cost of the memory layer.
+    public var memory = MemoryMetrics()
+
     /// Creates a zeroed snapshot.
     public init() {}
+
+    /// Aggregated cost of memory consolidation.
+    ///
+    /// Kept as its own sub-struct rather than as loose fields because the
+    /// memory layer's whole justification is a cost argument: it is a
+    /// latency and token mechanism, not an accuracy claim, so the counters
+    /// that decide whether it earns its place have to be readable as one
+    /// group. ``memoryModelCalls`` is the headline number — it is `0` for
+    /// the fully deterministic configuration, and any drift above zero is
+    /// a design change, not noise.
+    public struct MemoryMetrics: Sendable {
+        /// Number of completed consolidation passes (one per turn).
+        public var consolidations: Int = 0
+        /// Facts inserted across all passes.
+        public var factsAdded: Int = 0
+        /// Facts superseded by a newer record across all passes.
+        public var factsUpdated: Int = 0
+        /// Facts retired by retraction across all passes.
+        public var factsDeleted: Int = 0
+        /// Transcript rounds moved into the archive across all passes.
+        public var roundsArchived: Int = 0
+        /// Model calls the write path actually issued.
+        public var memoryModelCalls: Int = 0
+        /// Wall-clock distribution of consolidation passes.
+        public var consolidationLatency = LatencyStats()
+        /// Creates a zeroed `MemoryMetrics`.
+        public init() {}
+
+        /// Facts written per pass, averaged over completed passes.
+        public var averageFactsPerConsolidation: Double {
+            consolidations == 0 ? 0 : Double(factsAdded + factsUpdated + factsDeleted) / Double(consolidations)
+        }
+        /// Model calls per pass, averaged over completed passes. The
+        /// deterministic configuration holds this at exactly `0`.
+        public var averageModelCallsPerConsolidation: Double {
+            consolidations == 0 ? 0 : Double(memoryModelCalls) / Double(consolidations)
+        }
+    }
 
     /// Successful runs as a fraction of ended runs (0 when no runs have ended).
     public var successRate: Double {

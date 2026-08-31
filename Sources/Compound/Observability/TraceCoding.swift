@@ -93,6 +93,16 @@ extension TraceEvent {
         case newSources = "new_sources"
         case rounds
         case sources
+        // memory.consolidated. All integers, all aggregatable; `elapsed`
+        // is deliberately the same `elapsed_ns` key every other timed
+        // event uses, so one query answers "how long did this take" for
+        // model turns, tools, verifiers, and consolidation alike.
+        case extracted
+        case added
+        case updated
+        case deleted
+        case archived
+        case modelCalls = "model_calls"
         case kind
         case category
         case message
@@ -181,6 +191,14 @@ extension TraceEvent {
             try container.encode(rounds, forKey: .rounds)
             try container.encode(sources, forKey: .sources)
             try container.encode(reason, forKey: .reason)
+        case .memoryConsolidated(_, let extracted, let added, let updated, let deleted, let archived, let modelCalls, let elapsed):
+            try container.encode(extracted, forKey: .extracted)
+            try container.encode(added, forKey: .added)
+            try container.encode(updated, forKey: .updated)
+            try container.encode(deleted, forKey: .deleted)
+            try container.encode(archived, forKey: .archived)
+            try container.encode(modelCalls, forKey: .modelCalls)
+            try container.encode(DurationCoding.nanoseconds(elapsed), forKey: .elapsed)
         case .repairScheduled(_, let attempt, let diagnostic):
             try container.encode(attempt, forKey: .attempt)
             try container.encode(diagnostic, forKey: .diagnostic)
@@ -324,6 +342,17 @@ extension TraceEvent {
                 rounds: try container.decode(Int.self, forKey: .rounds),
                 sources: try container.decode(Int.self, forKey: .sources),
                 reason: try container.decode(String.self, forKey: .reason)
+            )
+        case "memory.consolidated":
+            self = .memoryConsolidated(
+                runID: run,
+                extracted: try container.decode(Int.self, forKey: .extracted),
+                added: try container.decode(Int.self, forKey: .added),
+                updated: try container.decode(Int.self, forKey: .updated),
+                deleted: try container.decode(Int.self, forKey: .deleted),
+                archived: try container.decode(Int.self, forKey: .archived),
+                modelCalls: try container.decode(Int.self, forKey: .modelCalls),
+                elapsed: try elapsed()
             )
         case "repair.scheduled":
             self = .repairScheduled(
