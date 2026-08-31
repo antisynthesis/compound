@@ -1,6 +1,8 @@
 # Examples
 
-Runnable patterns demonstrating Compound's typical wirings. Each example is a single `main.swift` file plus a brief README; none are part of the Compound library's build graph because they use the `@Generable` macro from `FoundationModels` or the `@Model` macro from `SwiftData`, both of which require compiler plugins that ship only with full Xcode (not with the CommandLineTools toolchain CI uses).
+Runnable patterns demonstrating Compound's typical wirings. Each example is a single `main.swift` file plus a brief README; none are part of the Compound library's build graph, because they use the `@Generable` macro from `FoundationModels` or the `@Model` macro from `SwiftData`, and putting those macro plugins on `swift build`'s critical path would change the library's build graph for every consumer.
+
+They are not unchecked, though: CI type-checks every example against the built module (`xcrun swiftc -typecheck -parse-as-library -I .build/debug`), so an example that drifts out of sync with the API fails the build. That step needs full Xcode; the library itself still builds under the CommandLineTools toolchain.
 
 To run an example, open this package in Xcode 26 on a device or simulator with Apple Intelligence enabled and add the example as a target.
 

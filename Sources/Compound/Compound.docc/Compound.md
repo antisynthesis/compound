@@ -24,6 +24,13 @@ Compound implements that pattern as a Swift package targeting Apple platforms. T
 - ``StreamingControlLoop``
 - ``LoopOutcome``
 - ``StreamingLoopOutcome``
+- ``TypedRunOutcome``
+- ``SamplingStrategy``
+- ``SelectionPolicy``
+- ``SampleVariation``
+- ``SampledCandidate``
+- ``BestOfNDraw``
+- ``AgreementRate``
 - ``ModelClient``
 - ``ModelResponding``
 - ``ModelStreaming``
@@ -48,7 +55,19 @@ Compound implements that pattern as a Swift package targeting Apple platforms. T
 - ``DenseRetriever``
 - ``HybridRetriever``
 - ``Reranker``
+- ``IdentityReranker``
+- ``LexicalProximityReranker``
+- ``ModelReranker``
 - ``RerankingRetriever``
+- ``IterativeRetrievalAssembler``
+- ``SufficiencyVerdict``
+- ``SufficiencyAssessing``
+- ``AlwaysSufficientAssessor``
+- ``TermCoverageAssessor``
+- ``ModelSufficiencyAssessor``
+- ``QueryReformulating``
+- ``MissingAspectReformulator``
+- ``ModelQueryReformulator``
 - ``DocumentChunker``
 - ``Redactor``
 - ``PatternRedactor``
@@ -94,6 +113,8 @@ Compound implements that pattern as a Swift package targeting Apple platforms. T
 
 - ``Tracer``
 - ``TraceEvent``
+- ``TraceRecord``
+- ``TraceReader``
 - ``TraceEventVisitor``
 - ``NullTracer``
 - ``InMemoryTracer``
@@ -106,6 +127,18 @@ Compound implements that pattern as a Swift package targeting Apple platforms. T
 - ``RedactingTracer``
 - ``MetricsCollectingTracer``
 - ``MetricsSnapshot``
+
+### Reliability under load
+
+- ``DegradedMode``
+- ``DegradationSignal``
+- ``DegradationPolicy``
+- ``BreakerState``
+- ``HealthMonitor``
+- ``HealthAssessment``
+- ``RoutingPolicy``
+- ``EscalationStep``
+- ``RoutedOutcome``
 
 ### Governance
 
@@ -141,6 +174,15 @@ Compound implements that pattern as a Swift package targeting Apple platforms. T
 - ``ContainsPredicate``
 - ``MatchesRegexPredicate``
 - ``VerifierPredicate``
+- ``EvalGate``
+- ``RetrievalMetrics``
+- ``RetrievalScores``
+- ``RetrievalEvalCase``
+- ``RetrievalEvalSuite``
+- ``RetrievalEvalRunner``
+- ``RetrievalEvalReport``
+- ``RetrievalRobustness``
+- ``RankStability``
 
 ### Reliability
 

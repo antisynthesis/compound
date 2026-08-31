@@ -72,7 +72,7 @@ flowchart TD
 
     subgraph CTX ["🧩 Context Assembly"]
         direction LR
-        RET["Retrievers<br/>BM25 · Dense · Hybrid · RRF"]
+        RET["Retrievers<br/>BM25 · Dense · Hybrid · RRF<br/>rerank · iterative loop"]
         RED["Redactors"]
         GATE["Policy gates"]
         BUD["Token budget"]
@@ -93,13 +93,14 @@ flowchart TD
     end
 
     subgraph LOOP ["🔁 Control Loop"]
-        CL["Propose → check → repair<br/>budgets · cancellation"]
+        CL["Propose → check → repair<br/>best-of-N · confidence · routing<br/>budgets · cancellation"]
     end
 
     subgraph OBS ["🔍 Observability &amp; Governance"]
         TRC["Tracer"]
         PRG["ProgressReporter"]
         POL["Policy"]
+        HLTH["HealthMonitor<br/>degradation ladder"]
         AUD["Audit"]
     end
 
@@ -144,11 +145,17 @@ flowchart TD
 
 Retrieval kit:
 
-- `BM25Retriever`: pure-Swift Robertson/Zaragoza BM25
-- `DenseRetriever`: cosine over precomputed `NLEmbedding.sentenceEmbedding` vectors (on-device)
-- `HybridRetriever`: Reciprocal Rank Fusion across any combination
-- `Reranker` / `RerankingRetriever`: opt-in second pass
-- `DocumentChunker`: sliding-window and paragraph chunkers
+- `BM25Retriever`: pure-Swift Robertson/Zaragoza BM25. `index` is an upsert — re-indexing an id retracts the superseded posting's contribution — with `remove(id:)` / `removeAll()` / `contains(id:)` alongside
+- `DenseRetriever`: cosine over precomputed `NLEmbedding.sentenceEmbedding` vectors (on-device), same lifecycle surface
+- `HybridRetriever`: Reciprocal Rank Fusion across any combination, one credit per member retriever at its best rank
+- `Reranker` / `RerankingRetriever`: opt-in second pass. `LexicalProximityReranker` scores query-term coverage, minimal-window proximity, and exact phrases deterministically on-device; `ModelReranker` batches relevance scoring behind a deadline and falls back to first-stage order on any failure
+- `DocumentChunker`: sliding-window and paragraph chunkers. Chunk ids are **deterministic** — a domain-separated, length-prefixed SHA256 over document id, ordinal, and NFC-normalized content — so the same document chunks identically across processes and machines, and eval ground truth can name chunks by id
+
+Both retrievers break score ties by chunk id, so ranking is a function of corpus contents rather than of insertion order.
+
+Iterative (agentic) retrieval:
+
+`IterativeRetrievalAssembler` runs a controller-owned retrieve → assess → reformulate → re-retrieve loop, bounded by round count, per-round top-k, an accumulated-source cap, and a wall-clock deadline. Sufficiency is judged by a `SufficiencyAssessing` conformer (`TermCoverageAssessor` is deterministic and off-device; `ModelSufficiencyAssessor` asks the model) and the next query comes from a `QueryReformulating` conformer. Evidence is deduped by chunk id and ordered by *interleaved rank*, because scores from different queries are not comparable. Final assembly is delegated to an inner assembler built over the gathered evidence, so redaction, policy, fencing, and token budgeting all still apply. Every bound degrades rather than fails: an elapsed deadline or a post-round-1 failure assembles with the evidence in hand and records why in `StopReason`.
 
 ### Stochastic core
 
@@ -202,25 +209,87 @@ Verifiers compose with `Verifier.contramap`, so a `Verifier<String>` is reusable
 
 ### Control loop
 
-`ControlLoop` runs propose-and-check until pass / reject / escalate / budget exhausted. `StreamingControlLoop` does the same but yields `ProgressEvent`s while running. Both respect `Task.cancel()`. `Budget` covers turns, tool calls, repair attempts, wall-clock, output tokens, and streaming stall caps (`firstToken`, `interChunkGap`); every cap is the number of allowed occurrences, and in-flight model calls are wall-clock bounded, so a hung model surfaces as `budgetExhausted` instead of blocking forever.
+`ControlLoop` runs propose-and-check until pass / reject / escalate / budget exhausted. `StreamingControlLoop` does the same but yields `ProgressEvent`s while running. Both respect `Task.cancel()`. `Budget` covers turns, tool calls, repair attempts, wall-clock, output tokens, best-of-N samples, and streaming stall caps (`firstToken`, `interChunkGap`); every cap is the number of allowed occurrences, and in-flight model calls are wall-clock bounded, so a hung model surfaces as `budgetExhausted` instead of blocking forever.
 
 Repair prompts are self-contained by default (`RepairPromptBuilder`): the original task, the byte-capped failed output, and every diagnostic travel with the repair turn, so stateless transports can actually repair (`.diagnosticOnly` restores the minimal prompt for stateful ones). Transient model failures (rate limiting, connectivity, model still downloading) are retried per a configurable `retryPolicy`; guardrail violations and refusals surface immediately as typed `CompoundError` cases.
 
 Typed structured output runs through the same loop: `ControlLoop.run(..., extract:verifiers:)` and `CompoundSession.respond(to:generating:)` produce a `TypedRunOutcome<T>` gated by a typed `VerifierChain<T>`, in two-phase `.reasonThenExtract` (free-form reasoning with tools, then constrained extraction) or single-phase `.direct` mode.
 
+### Sampling, confidence, and routing
+
+A single draw from a small on-device model is a coin flip. `SamplingStrategy.bestOf(n:selection:variation:)` draws several candidates per free-form turn, scores each against the run's own `VerifierChain`, and hands one winner to the normal verdict disposition — the verifiers you already wrote are the selection function, not a separate judge model.
+
+```swift
+let session = CompoundSession(.init(
+    // …
+    sampling: .bestOf(n: 4),                       // .single is the default
+    routing: RoutingPolicy(minConfidence: 0.6, escalation: [
+        .samples(8),                               // draw more, then re-check
+        .tightenVerifiers([LanguageVerifier(allowed: [.english]).erased()])
+    ])
+))
+
+let routed = try await session.respondRouted(to: prompt)
+if routed.lowConfidence { /* defer to a human */ }
+```
+
+- **Selection.** `.weightedVerifierScore(weights:)` (the default) draws all `n` and takes the highest weighted fraction of chain members satisfied. `.firstPassing` draws lazily and stops at the first candidate that clears the whole chain — cheaper, but it usually leaves no pair to compare and so reports no confidence. A candidate that draws `reject`/`escalate` is disqualified and skipped; the run fails terminally only when *every* candidate is disqualified.
+- **Variation.** Per-sample `GenerationOptions` walk an ascending temperature ladder by default; `.fixed` opts out and `seedBase` makes a whole draw reproducible.
+- **Confidence.** `AgreementRate` is the mean pairwise token-overlap Jaccard across candidates — deterministic and off-device. It surfaces as `LoopOutcome.confidence` and on the `sampling.best_of_n` trace event. Agreement is a proxy for stability, not for correctness; treat a low number as "escalate or ask a human", never a high one as "this is true".
+- **Budget.** Best-of-N multiplies model calls, so `BudgetUsage.samples` counts every drawn candidate and `Budget.maxSamples` caps them. Single-candidate runs never debit it. Output tokens are recorded for losing candidates too — they were generated and they cost what they cost.
+- **Routing.** `session.respondRouted(to:)` re-runs a turn at successively higher `EscalationStep` rungs while confidence sits below the bar, bounded by the ladder's length, and returns a `RoutedOutcome` carrying the applied steps and a `lowConfidence` flag.
+
+Streaming does not sample: `n` interleaved chunk sequences cannot be replayed as one coherent stream. The typed loop samples only its reasoning phase, so a `.direct` run has no confidence signal.
+
+### Degrading instead of failing
+
+An on-device model is a resource that can go away — Apple Intelligence gets disabled, the device runs hot, a guardrail starts tripping on every prompt. `HealthMonitor` runs one circuit breaker per typed failure class (guardrail violations, deadline and stall caps, model unavailability, context pressure), opening after N consecutive failures, half-opening after a cooldown, and closing on a probe success.
+
+The breaker's state picks a rung on a cumulative ladder, which `CompoundSession` applies before every run:
+
+| `DegradedMode` | What the run does |
+|---|---|
+| `full` | Everything, unchanged |
+| `reducedContext` | Assembled prompt squeezed to a fraction of the context high watermark |
+| `noTools` | …and the tool registry is withheld from the model |
+| `deterministicOnly` | …and the model is not called at all: returns `Configuration.degradedFallback`, or throws `CompoundError.degraded(mode:reason:)` |
+
+Verifier rejections and policy denials deliberately do **not** trip a breaker — they describe one prompt, not the device. Inspect and override with `session.currentDegradedMode()`, `session.healthAssessment()`, and `session.setDegradedMode(_:)`.
+
 ### Observability and governance
 
 - `Tracer` protocol with `NullTracer`, `InMemoryTracer`, `OSLogTracer`, `JSONLTracer`, `SignpostTracer`, `CompositeTracer`, `MetricsCollectingTracer`
-- `RedactingTracer(inner:redactors:)` wraps any tracer and scrubs reject reasons, diagnostics, and tool names before they reach the inner tracer. Drop it in front of `JSONLTracer` so persisted traces never carry raw secrets.
+- **Traces round-trip.** `TraceEvent` is `Codable`, `TraceRecord` pairs an event with the instant it was emitted, and `JSONLTracer` writes the full event losslessly under a stable `type` discriminator (durations as nanoseconds). `TraceReader` decodes a file — or a rotated set, oldest-first — back into `[TraceRecord]`: corrupt or truncated lines are skipped and *counted* rather than thrown, and an event type this build does not recognize decodes as `.unknown`, so an older consumer can still read a newer run's trace.
+- **Traces are bounded.** `JSONLTracer` rotates at `maxFileBytes` (default 8 MiB) across `maxFiles` (default 4), so an on-device trace cannot grow without limit. `FlushPolicy` (`.never` (default) / `.everyEvent` / `.everyN(Int)`) trades durability against write cost.
+- `RedactingTracer(inner:redactors:)` scrubs **structurally** — it encodes the event, rewrites every string in the JSON tree, and decodes it back — rather than enumerating cases, so a newly added `TraceEvent` case cannot bypass redaction by omission. Only the load-bearing identifier keys (`type`, `run`, `kind`, `ts`, and the enum raw values `signal` / `from` / `to` / `mode`) pass through untouched; an event that fails the round-trip is withheld and replaced with a placeholder. Drop it in front of `JSONLTracer` so persisted traces never carry raw secrets.
 - `OSLogTracer.PrivacyLevel` (`.maximal` / `.balanced` (default) / `.opaque`) governs whether free-form trace fields are marked `.private` to the unified log
-- `JSONLTracer.FlushPolicy` (`.never` (default) / `.everyEvent` / `.everyN(Int)`) trades durability against write cost
+- `SignpostTracer` emits `os_signpost` begin/end **intervals** for runs, model turns, and tool invocations under deterministic IDs derived from the run UUID, so Instruments profiles durations rather than isolated points
 - `CompositeTracer` fans out to its members in parallel via `TaskGroup`
-- `TraceEvent.unknown(runID:label:payload:)` keeps switches forward-compatible; `TraceEventVisitor` is the no-op-defaulted shape for extension-friendly consumers
+- `TraceEvent.unknown(runID:label:payload:)` keeps switches forward-compatible; `TraceEventVisitor` is the no-op-defaulted shape for extension-friendly consumers. Beyond the run/model/tool/verifier/budget events, the taxonomy covers `sampling.best_of_n`, `health.breaker`, `health.degraded`, `routing.escalated`, `retrieval.round`, and `retrieval.loop_ended`.
 - `ProgressReporter` protocol with `NullProgressReporter`, `RecordingProgressReporter`, `StreamingProgressReporter` (for SwiftUI binding)
 - `Policy` framework with `AuthContext`, `ScopeRequirement`, `CompositePolicy`
 
-### Recent hardening
+### Evaluation and the golden gate
 
+`EvalCase` / `EvalSuite` / `EvalRunner` produce a Codable `EvalReport` with an environment snapshot; `EvalGate` turns one into a pass/fail against a pass-rate threshold and a committed baseline, listing per-case regressions.
+
+A **golden suite** of 32 deterministic cases ships in the test target and runs on every `swift test`. It replays loop repair, every budget-exhaustion kind, model-error classification, shell/SQL/secret gate red-team samples (with positive controls, so a gate that rejects everything cannot pass), redaction and prompt framing, and typed reason-then-extract — entirely off-device against fakes, so a CI runner without Apple Intelligence still gates. Each case renders the run's *observable behavior* as `key=value` lines rather than raw model output, which is what lets a terminal rejection or an exhausted budget be a golden case at all. `EvalReport.normalizedForBaseline()` neutralizes clock- and UUID-derived fields so the committed baseline at `Evals/baseline.json` diffs only when behavior actually moved.
+
+Regenerate deliberately, never incidentally:
+
+```sh
+REGENERATE_EVAL_BASELINE=1 swift test --filter GoldenGate
+```
+
+Regeneration refuses to write when any case fails — a red baseline would gate nothing forever.
+
+Retrieval gets its own evals. `RetrievalMetrics` computes recall@k, precision@k, graded nDCG@k, and reciprocal rank, each returning `nil` when the metric is *undefined* for a query rather than a misleading zero — an abstention case has no relevant set, and scoring it `0.0` would make a suite look worse the more correctly-abstaining cases you add. `RetrievalEvalRunner` scores any `Retriever` against graded ground truth keyed by deterministic chunk ids; a retriever that throws fails only its own case and is excluded from the aggregate means, so a broken index cannot be mistaken for a merely bad one. `RetrievalRobustness` adds near-duplicate distractor generation, rank stability (overlap, top-rank retention, max displacement, Kendall's tau), and abstention summarization.
+
+### Hardening
+
+- Retrieval indexes are correct under mutation: `index` is an upsert that retracts the superseded posting's contribution, `remove` restores document-frequency and average-length statistics to a never-indexed state, and a re-indexed chunk whose content embeds to a zero-norm vector is removed rather than left stale.
+- Background activity honors one cancellation contract on both platforms: the macOS `NSBackgroundActivityScheduler` path holds and cancels the work `Task` when the scheduler asks to defer, and a `BGTask` expiration that lands before the work task is registered is remembered and applied instead of dropped.
+- Trace decoding is hostile-input safe: `Budget.init(from:)` validates rather than preconditions, so a corrupt trace file throws a `DecodingError` instead of trapping the process, and `TraceReader` skips and counts malformed lines rather than failing the read.
 - SSRF gating in `WebFetchTool`: every A/AAAA record from a `HostResolver` (default `SystemHostResolver`) is checked against the URL block list before the request is issued, every HTTP redirect hop is re-gated against the full policy with a hop cap (default 5), and `URLSession.bytes(for:)` enforces the byte cap mid-stream.
 - Typed error taxonomy: FoundationModels session failures map to `CompoundError` cases (`guardrailViolation`, `contextWindowExceeded(promptTokens:)`, `refusal`, `unsupportedLanguage`, `modelRateLimited`) at the `ModelClient` boundary instead of an opaque `.underlying` wrapper.
 - Internal verifier errors fail closed: `SecretsVerifier` compiles its default rules eagerly (no silent drops) and `JSONSchemaVerifier` rejects an uncompilable `pattern` instead of treating it as no-constraint; `PatternRedactor` replaces oversized inputs rather than passing them through unscanned.
@@ -228,7 +297,6 @@ Typed structured output runs through the same loop: `ControlLoop.run(..., extrac
 - Token accounting: `SessionTokenLedger` tracks context occupancy per turn; `ModelClient` proactively compacts its session past a configurable high watermark, and `CompoundSession.respond` recovers from context overflow with one token-budgeted re-assembly.
 - `DefaultProcessRunner` drains stdout/stderr concurrently (no more >64 KB pipe deadlock), caps captured output with a truncation marker, and escalates SIGTERM → SIGKILL on timeout or cancellation.
 - IP canonicalization across `URLSafetyVerifier` uses `inet_pton` so octal, hex, decimal-integer, IPv4-mapped IPv6, CGNAT, NAT64, Teredo, ULA, and link-local addresses all resolve to the same blocked space; non-ASCII hosts (IDN homographs) are rejected.
-- `RedactingTracer` scrubs reject reasons, diagnostics, and tool names before they reach the inner tracer; pair it with `JSONLTracer` so persisted traces never carry raw secrets.
 - `ModelResponding` and `ModelStreaming` protocols extract the non-streaming and streaming halves of `ModelClient` so tests can inject fakes against `ControlLoop` and `StreamingControlLoop` without a live `LanguageModelSession`.
 - `ProcessRunner` defaults to a sanitized child environment (`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`); pass `inheritEnvironment: true` to opt back in.
 - Regex DoS bounds: every `SecretsVerifier` and `PIIVerifier` pattern has bounded quantifiers and an `inputSizeLimit` short-circuit. `JSONSchemaVerifier` carries `maxDepth: 64` and `maxNodes: 10_000`.
@@ -240,9 +308,13 @@ Typed structured output runs through the same loop: `ControlLoop.run(..., extrac
 |---|---|
 | Versioned prompts | `PromptTemplate`, `PromptRegistry` |
 | Evaluation | `EvalCase`, `EvalSuite`, `EvalRunner`, `EvalReport` (Codable, with environment snapshot), `EvalGate` (pass-rate + baseline regression gate), `EvalPredicate` (Contains / DoesNotContain / MatchesRegex / Verifier / Closure) |
+| Regression gating | 32-case golden suite + `EvalReport.normalizedForBaseline()` + committed `Evals/baseline.json`, run on every `swift test` |
+| Retrieval evaluation | `RetrievalMetrics`, `RetrievalEvalCase`/`Suite`/`Runner`/`Report`, `RetrievalRobustness` (distractors, rank stability, abstention) |
+| Reliability under load | `HealthMonitor` (per-signal circuit breakers), `DegradedMode` ladder, `RoutingPolicy` confidence cascade |
 | Transient-error retry | `Retry.with`, `RetryPolicy` (exponential backoff + jitter), `RetryClassifier` |
 | Conversation history | `ConversationMessage`, `InMemoryConversationStore`, `JSONLConversationStore` |
-| Document chunking | `DocumentChunker.slidingWindow`, `DocumentChunker.paragraphs` |
+| Document chunking | `DocumentChunker.slidingWindow`, `DocumentChunker.paragraphs` (deterministic chunk ids) |
+| Trace export | `TraceRecord`, `TraceReader`, size-bounded rotating `JSONLTracer` |
 
 ## Apple-platform integration
 
@@ -264,19 +336,20 @@ Sources/Compound/
   Compound.swift              umbrella
   Core/                       Budget · RunContext · Errors · Progress · Retry · Deadline
   Conversation/               Message · ConversationStore · ConversationContextAssembler
-  Context/                    ContextAssembler · Redactor · DocumentChunker · BM25/Dense/Hybrid retrievers · Reranker · TokenBudgetedAssembler
+  Context/                    ContextAssembler · Redactor · DocumentChunker · BM25/Dense/Hybrid retrievers · Reranker · TokenBudgetedAssembler · IterativeRetrievalAssembler · QuerySufficiency
   Model/                      ModelClient · ModelResponding · ModelStreaming · ModelStreamResult
   Tools/                      VerifiedTool · ToolRegistry · Builtins (Calculator · KVStore · Search · WebFetch)
   Verifiers/                  ~40 verifier types · Verifier · VerifierChain · Verdict · Diagnostic
-  ControlLoop/                ControlLoop · StreamingControlLoop · CompoundSession
-  Observability/              Tracer · TraceEvent · TraceEventVisitor · RedactingTracer · SignpostTracer · MetricsCollectingTracer
+  ControlLoop/                ControlLoop · StreamingControlLoop · CompoundSession · BestOfNSampler · Degradation
+  Observability/              Tracer · TraceEvent · TraceCoding · TraceReader · TraceEventVisitor · RedactingTracer · SignpostTracer · MetricsCollectingTracer
   Governance/                 Policy · AuthContext · ScopeRequirement
   Prompts/                    PromptTemplate · PromptRegistry
-  Eval/                       EvalCase · EvalPredicate · EvalRunner · EvalReport · EvalGate
+  Eval/                       EvalCase · EvalPredicate · EvalRunner · EvalReport · EvalGate · RetrievalMetrics · RetrievalEvalCase · RetrievalRobustness
   Intents/                    AppIntents bridge (Siri / Shortcuts / Spotlight)
   Background/                 BGTaskScheduler / NSBackgroundActivityScheduler wrappers
-Examples/                     Runnable patterns (excluded from main build; require full Xcode)
-Tests/CompoundTests/          Swift Testing suite
+Evals/baseline.json           Committed golden-eval baseline (outside every target directory)
+Examples/                     Runnable patterns (excluded from main build; type-checked in CI)
+Tests/CompoundTests/          Swift Testing suite (Golden/ holds the golden eval suite)
 ```
 
 ## Tests
@@ -285,7 +358,7 @@ Tests/CompoundTests/          Swift Testing suite
 swift test
 ```
 
-The suite is Swift Testing (`@Test`, `@Suite`, `#expect`). It runs from the command line under Swift 6.2 and inside Xcode 26.
+The suite is Swift Testing (`@Test`, `@Suite`, `#expect`). It runs from the command line under Swift 6.2 and inside Xcode 26. Everything is off-device against fakes, including the golden regression gate, so a machine without Apple Intelligence still runs the whole suite.
 
 ## Architecture Concepts & Research
 
@@ -326,9 +399,13 @@ Compound is shaped by a fast-moving body of research on building production AI s
 - Gao, Xiong, Gao, et al. **Retrieval-Augmented Generation for Large Language Models: A Survey.** [arXiv:2312.10997](https://arxiv.org/abs/2312.10997)
 - Robertson, Zaragoza. **The Probabilistic Relevance Framework: BM25 and Beyond.** [Foundations and Trends in IR, 2009](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf)
 - Cormack, Clarke, Buettcher. **Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods.** [SIGIR 2009](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)
+- Nogueira, Cho. **Passage Re-ranking with BERT.** [arXiv:1901.04085](https://arxiv.org/abs/1901.04085)
+- Trivedi, Balasubramanian, Khot, Sabharwal. **Interleaving Retrieval with Chain-of-Thought Reasoning for Knowledge-Intensive Multi-Step Questions (IRCoT).** [arXiv:2212.10509](https://arxiv.org/abs/2212.10509)
+- Jiang, Xu, Gao, et al. **Active Retrieval Augmented Generation (FLARE).** [arXiv:2305.06983](https://arxiv.org/abs/2305.06983)
 
 ### Verification, self-correction, and process supervision
 
+- Cobbe, Kosaraju, Bavarian, et al. **Training Verifiers to Solve Math Word Problems.** [arXiv:2110.14168](https://arxiv.org/abs/2110.14168) — the best-of-N-against-a-verifier result `SamplingStrategy.bestOf` implements, with the run's own `VerifierChain` standing in for a learned verifier.
 - Madaan, Tandon, Gupta, et al. **Self-Refine: Iterative Refinement with Self-Feedback.** [arXiv:2303.17651](https://arxiv.org/abs/2303.17651)
 - Shinn, Cassano, Berman, et al. **Reflexion: Language Agents with Verbal Reinforcement Learning.** [arXiv:2303.11366](https://arxiv.org/abs/2303.11366)
 - Lightman, Kosaraju, Burda, et al. **Let's Verify Step by Step.** [arXiv:2305.20050](https://arxiv.org/abs/2305.20050)
