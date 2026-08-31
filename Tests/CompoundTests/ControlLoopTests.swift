@@ -59,7 +59,7 @@ struct ControlLoopTests {
         #expect(outcome.usage.repairAttempts == 1)
     }
 
-    @Test("loop fails with budgetExhausted when maxRepairAttempts hit")
+    @Test("maxRepairAttempts 1 permits exactly one repair then throws .repairAttempts")
     func budgetExhaustedRepair() async throws {
         let model = FakeModel(["bad"])
         let chain = VerifierChain<String>(name: "out", [
@@ -69,8 +69,161 @@ struct ControlLoopTests {
         ])
         let budget = Budget(maxTurns: 10, maxToolCalls: 0, maxRepairAttempts: 1, wallClock: .seconds(60))
         let loop = ControlLoop(budget: budget, outputVerifier: chain)
-        await #expect(throws: CompoundError.self) {
+        do {
             _ = try await loop.run(prompt: "p", modelClient: model, runContext: RunContext())
+            Issue.record("expected budgetExhausted(.repairAttempts)")
+        } catch CompoundError.budgetExhausted(let kind, let usage) {
+            #expect(kind == .repairAttempts)
+            #expect(usage.repairAttempts == 1)
+            #expect(usage.turns == 2)
+        }
+        // Initial turn plus exactly one repair turn.
+        let calls = await model.calls
+        #expect(calls == 2)
+    }
+
+    @Test("maxTurns 1 permits exactly one model call on the happy path")
+    func maxTurnsOnePermitsOneCall() async throws {
+        let model = FakeModel(["hello"])
+        let chain = VerifierChain<String>(name: "out", [
+            AnyVerifier<String>(name: "pass", cost: .parse) { _, _ in .pass }
+        ])
+        let budget = Budget(maxTurns: 1, maxToolCalls: 4, maxRepairAttempts: 1, wallClock: .seconds(60))
+        let loop = ControlLoop(budget: budget, outputVerifier: chain)
+        let outcome = try await loop.run(prompt: "p", modelClient: model, runContext: RunContext())
+        #expect(outcome.output == "hello")
+        #expect(outcome.usage.turns == 1)
+        let calls = await model.calls
+        #expect(calls == 1)
+    }
+
+    @Test("maxTurns 1 refuses the second turn with .turns after one model call")
+    func maxTurnsOneRefusesSecondTurn() async throws {
+        let model = FakeModel(["bad"])
+        let chain = VerifierChain<String>(name: "out", [
+            AnyVerifier<String>(name: "always-repair", cost: .parse) { _, _ in
+                .repair(Diagnostic(verifier: "always-repair", message: "again"))
+            }
+        ])
+        let budget = Budget(maxTurns: 1, maxToolCalls: 4, maxRepairAttempts: 5, wallClock: .seconds(60))
+        let loop = ControlLoop(budget: budget, outputVerifier: chain)
+        do {
+            _ = try await loop.run(prompt: "p", modelClient: model, runContext: RunContext())
+            Issue.record("expected budgetExhausted(.turns)")
+        } catch CompoundError.budgetExhausted(let kind, let usage) {
+            #expect(kind == .turns)
+            #expect(usage.turns == 1)
+        }
+        let calls = await model.calls
+        #expect(calls == 1)
+    }
+
+    @Test("reject verdict throws verifierRejected carrying the rejecting diagnostic")
+    func rejectVerdict() async throws {
+        let model = FakeModel(["anything"])
+        let chain = VerifierChain<String>(name: "out", [
+            AnyVerifier<String>(name: "gate", cost: .parse) { _, _ in
+                .reject(Diagnostic(verifier: "gate", message: "not allowed"))
+            }
+        ])
+        let loop = ControlLoop(budget: .default, outputVerifier: chain)
+        do {
+            _ = try await loop.run(prompt: "p", modelClient: model, runContext: RunContext())
+            Issue.record("expected verifierRejected")
+        } catch CompoundError.verifierRejected(let reason, let diag) {
+            #expect(reason == "not allowed")
+            #expect(diag?.message == "not allowed")
+            #expect(diag?.verifier == "gate")
+        }
+    }
+
+    @Test("escalate verdict throws escalationRequired carrying the escalating diagnostic")
+    func escalateVerdict() async throws {
+        let model = FakeModel(["anything"])
+        let chain = VerifierChain<String>(name: "out", [
+            AnyVerifier<String>(name: "hitl", cost: .parse) { _, _ in
+                .escalate(Diagnostic(verifier: "hitl", message: "needs a human"))
+            }
+        ])
+        let loop = ControlLoop(budget: .default, outputVerifier: chain)
+        do {
+            _ = try await loop.run(prompt: "p", modelClient: model, runContext: RunContext())
+            Issue.record("expected escalationRequired")
+        } catch CompoundError.escalationRequired(let reason, let diag) {
+            #expect(reason == "needs a human")
+            #expect(diag?.message == "needs a human")
+        }
+    }
+
+    @Test("reject after a repair carries the rejecting diagnostic, not the stale repair one")
+    func rejectAfterRepairCarriesFreshDiagnostic() async throws {
+        let model = FakeModel(["bad", "worse"])
+        let chain = VerifierChain<String>(name: "out", [
+            AnyVerifier<String>(name: "moody", cost: .parse) { input, _ in
+                input == "bad"
+                    ? .repair(Diagnostic(verifier: "moody", message: "first"))
+                    : .reject(Diagnostic(verifier: "moody", message: "second"))
+            }
+        ])
+        let loop = ControlLoop(budget: .default, outputVerifier: chain)
+        do {
+            _ = try await loop.run(prompt: "p", modelClient: model, runContext: RunContext())
+            Issue.record("expected verifierRejected")
+        } catch CompoundError.verifierRejected(let reason, let diag) {
+            #expect(reason == "second")
+            #expect(diag?.message == "second")
+        }
+    }
+
+    @Test("loop folds tool-call meter count into outcome usage")
+    func foldsToolCallMeterIntoUsage() async throws {
+        let meter = ToolCallMeter(limit: 10)
+        let ctx = RunContext(toolCallMeter: meter)
+        let model = ToolCallingFakeModel(meter: meter, toolCallsPerTurn: 3, response: "ok")
+        let chain = VerifierChain<String>(name: "out", [
+            AnyVerifier<String>(name: "pass", cost: .parse) { _, _ in .pass }
+        ])
+        let loop = ControlLoop(budget: .default, outputVerifier: chain)
+        let outcome = try await loop.run(prompt: "p", modelClient: model, runContext: ctx)
+        #expect(outcome.usage.toolCalls == 3)
+    }
+
+    @Test("maxToolCalls 2 aborts the third tool call mid-turn")
+    func maxToolCallsAbortsThirdCall() async throws {
+        let meter = ToolCallMeter(limit: 2)
+        let ctx = RunContext(toolCallMeter: meter)
+        let model = ToolCallingFakeModel(meter: meter, toolCallsPerTurn: 3, response: "ok")
+        let loop = ControlLoop(budget: .default, outputVerifier: .empty())
+        do {
+            _ = try await loop.run(prompt: "p", modelClient: model, runContext: ctx)
+            Issue.record("expected budgetExhausted(.toolCalls)")
+        } catch CompoundError.budgetExhausted(let kind, _) {
+            #expect(kind == .toolCalls)
+        }
+        let count = await meter.count
+        #expect(count == 2)
+    }
+
+    @Test("VerifiedTool refuses the call once the meter cap trips")
+    func verifiedToolRefusesOverCap() async throws {
+        let ctx = RunContext(toolCallMeter: ToolCallMeter(limit: 2))
+        let verified = VerifiedTool(
+            wrapped: CalculatorTool(),
+            argumentVerifiers: VerifierChain<CalculatorTool.Arguments>.empty(),
+            requiredScopes: [],
+            runContext: ctx,
+            policy: AllowAll()
+        )
+        let args = try CalculatorTool.Arguments(GeneratedContent(properties: ["expression": "1 + 2"]))
+        let first = try await verified.call(arguments: args)
+        #expect(first == "3")
+        _ = try await verified.call(arguments: args)
+        do {
+            _ = try await verified.call(arguments: args)
+            Issue.record("expected budgetExhausted(.toolCalls) on the third call")
+        } catch CompoundError.budgetExhausted(let kind, let usage) {
+            #expect(kind == .toolCalls)
+            #expect(usage.toolCalls == 2)
         }
     }
 
@@ -126,4 +279,35 @@ struct ControlLoopTests {
 actor AttemptCounter {
     var count = 0
     func bump() { count += 1 }
+}
+
+// Simulates a model turn that invokes tools while responding: each respond()
+// records `toolCallsPerTurn` calls against the shared meter, mirroring how
+// VerifiedTool records during a real FoundationModels turn. A tripped cap
+// surfaces mid-turn as the meter's budgetExhausted error.
+actor ToolCallingFakeModel: ModelResponding {
+    private let meter: ToolCallMeter
+    private let toolCallsPerTurn: Int
+    private let response: String
+
+    init(meter: ToolCallMeter, toolCallsPerTurn: Int, response: String) {
+        self.meter = meter
+        self.toolCallsPerTurn = toolCallsPerTurn
+        self.response = response
+    }
+
+    func respond(to prompt: String, options _: GenerationOptions) async throws -> String {
+        for _ in 0..<toolCallsPerTurn {
+            try await meter.record()
+        }
+        return response
+    }
+
+    func respondGenerating<T: Generable & Sendable>(
+        _ type: T.Type,
+        to prompt: String,
+        options: GenerationOptions
+    ) async throws -> T {
+        fatalError("unused in tests")
+    }
 }

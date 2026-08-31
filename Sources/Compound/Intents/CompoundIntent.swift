@@ -118,8 +118,22 @@ public struct IntentBridgeError: Swift.Error, CustomLocalizedStringResourceConve
             return "Tool '\(name)' received invalid arguments."
         case .toolArgumentRejected(let name, let diagnostic):
             return "Tool '\(name)' argument rejected: \(diagnostic.message)."
+        case .toolOutputRejected(let name, let diagnostic):
+            return "Tool '\(name)' output rejected: \(diagnostic.message)."
+        case .toolAlreadyRegistered(let name):
+            return "Tool '\(name)' is already registered."
         case .modelUnavailable(let reason):
             return "Model unavailable: \(reason)."
+        case .guardrailViolation:
+            return "The request was blocked by the on-device safety system."
+        case .contextWindowExceeded:
+            return "The conversation exceeded the model's context window."
+        case .refusal:
+            return "The model declined to respond."
+        case .unsupportedLanguage:
+            return "This language isn't supported by the on-device model."
+        case .modelRateLimited:
+            return "The model is busy. Try again shortly."
         case .cancelled:
             return "Operation cancelled."
         case .underlying(let error):

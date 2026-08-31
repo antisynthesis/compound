@@ -83,8 +83,9 @@ extension ModelClient {
                         reason: String(describing: error)
                     )
                 )
-                continuation.finish(throwing: CompoundError.underlying(error))
-                throw CompoundError.underlying(error)
+                let mapped = CompoundError.mapSessionError(error)
+                continuation.finish(throwing: mapped)
+                throw mapped
             }
         }
 
