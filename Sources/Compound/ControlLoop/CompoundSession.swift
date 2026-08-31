@@ -126,6 +126,19 @@ public struct CompoundSession: Sendable {
         /// Fraction of ``contextHighWatermark`` a ``DegradedMode/reducedContext``
         /// run is squeezed to. Defaults to 0.5.
         public var reducedContextFactor: Double
+        /// Conversation recording and memory write-path surface. `nil`
+        /// (the default) preserves the session's prior behavior exactly:
+        /// no store is appended to and no observer is called.
+        ///
+        /// When non-nil, ``respond(to:auth:progress:metadata:)`` and
+        /// ``respondRouted(to:auth:progress:metadata:)`` record the user
+        /// turn before the run and the assistant turn after it, then hand
+        /// the completed exchange to
+        /// ``MemorySessionConfiguration/observer``. Reading memory back is
+        /// the assembler's job — configure a ``MemoryContextAssembler``
+        /// over the same ``MemorySessionConfiguration/conversation`` store
+        /// as ``assembler``.
+        public var memory: MemorySessionConfiguration?
 
         /// Creates a configuration. Every field has a safe default so
         /// callers only override what they care about.
@@ -151,7 +164,8 @@ public struct CompoundSession: Sendable {
             health: HealthMonitor? = nil,
             routing: RoutingPolicy? = nil,
             degradedFallback: (@Sendable (String) async throws -> String)? = nil,
-            reducedContextFactor: Double = 0.5
+            reducedContextFactor: Double = 0.5,
+            memory: MemorySessionConfiguration? = nil
         ) {
             precondition(
                 contextHighWatermark > 0 && contextHighWatermark <= 1,
@@ -177,6 +191,7 @@ public struct CompoundSession: Sendable {
             self.routing = routing
             self.degradedFallback = degradedFallback
             self.reducedContextFactor = reducedContextFactor
+            self.memory = memory
         }
     }
 
@@ -442,6 +457,89 @@ public struct CompoundSession: Sendable {
         }
     }
 
+    // MARK: - Memory recording
+
+    /// How many preceding messages ride along in a ``MemoryTurn`` as
+    /// surrounding context.
+    static let memoryTurnRecentLimit = 8
+
+    /// Records the user turn ahead of the run and returns it, or `nil`
+    /// when no memory surface is configured.
+    ///
+    /// Recording *before* the attempt is what lets a
+    /// ``MemoryContextAssembler`` reading the same store see this turn
+    /// while assembling it — the transcript the model gets is the one the
+    /// conversation actually has.
+    private func recordUserTurn(
+        _ userPrompt: String,
+        metadata: [String: String]
+    ) async throws -> ConversationMessage? {
+        guard let memory = configuration.memory else { return nil }
+        let message = ConversationMessage(
+            role: .user,
+            content: userPrompt,
+            createdAt: memory.clock(),
+            metadata: [memory.threadIDMetadataKey: memory.threadID(in: metadata)]
+        )
+        if memory.recordsTurns {
+            try await memory.conversation.append(message)
+        }
+        return message
+    }
+
+    /// Records the assistant turn and hands the completed exchange to the
+    /// observer.
+    ///
+    /// Called only after a successful attempt. A run that threw leaves
+    /// the user turn appended — a failed turn is real history and hiding
+    /// it would make the next turn's transcript a lie — but appends no
+    /// assistant turn and notifies no observer, because an exchange with
+    /// no answer is not a consolidation unit: there is nothing to
+    /// reconcile and no assistant span to attribute.
+    private func recordAssistantTurn(
+        _ output: String,
+        userMessage: ConversationMessage?,
+        outcome: LoopOutcome,
+        auth: AuthContext,
+        progress: any ProgressReporter,
+        metadata: [String: String]
+    ) async throws {
+        guard let memory = configuration.memory, let userMessage else { return }
+        let threadID = memory.threadID(in: metadata)
+        let assistantMessage = ConversationMessage(
+            role: .assistant,
+            content: output,
+            createdAt: memory.clock(),
+            metadata: [memory.threadIDMetadataKey: threadID]
+        )
+        if memory.recordsTurns {
+            try await memory.conversation.append(assistantMessage)
+        }
+        guard let observer = memory.observer else { return }
+        // Surrounding context for extractors that want it, bounded so a
+        // long-lived thread cannot make every turn's hand-off grow. The
+        // two messages this call just recorded are excluded — they are
+        // already the turn.
+        var history = (try? await memory.conversation.messages()) ?? []
+        if memory.recordsTurns { history = Array(history.dropLast(2)) }
+        let recent = Array(history.suffix(CompoundSession.memoryTurnRecentLimit))
+        await observer.turnCompleted(
+            MemoryTurn(
+                threadID: threadID,
+                userMessage: userMessage,
+                assistantMessage: assistantMessage,
+                recent: recent
+            ),
+            runContext: RunContext(
+                runID: outcome.runID,
+                auth: auth,
+                tracer: configuration.tracer,
+                progress: progress,
+                metadata: metadata
+            )
+        )
+    }
+
     /// Runs a single non-streaming compound execution.
     ///
     /// If the model reports
@@ -473,7 +571,8 @@ public struct CompoundSession: Sendable {
         progress: any ProgressReporter = NullProgressReporter(),
         metadata: [String: String] = [:]
     ) async throws -> LoopOutcome {
-        try await attempt(
+        let userMessage = try await recordUserTurn(userPrompt, metadata: metadata)
+        let outcome = try await attempt(
             userPrompt: userPrompt,
             auth: auth,
             progress: progress,
@@ -481,6 +580,15 @@ public struct CompoundSession: Sendable {
             sampling: configuration.sampling,
             outputVerifier: configuration.outputVerifier
         )
+        try await recordAssistantTurn(
+            outcome.output,
+            userMessage: userMessage,
+            outcome: outcome,
+            auth: auth,
+            progress: progress,
+            metadata: metadata
+        )
+        return outcome
     }
 
     /// Runs a non-streaming execution under the confidence cascade.
@@ -521,6 +629,11 @@ public struct CompoundSession: Sendable {
         progress: any ProgressReporter = NullProgressReporter(),
         metadata: [String: String] = [:]
     ) async throws -> RoutedOutcome {
+        // Recorded once, before the first rung. Escalation re-runs the
+        // same user prompt; recording per rung would write the same turn
+        // several times and hand the observer duplicate consolidation
+        // units for one exchange.
+        let userMessage = try await recordUserTurn(userPrompt, metadata: metadata)
         var sampling = configuration.sampling
         var verifier = configuration.outputVerifier
         var outcome = try await attempt(
@@ -533,6 +646,14 @@ public struct CompoundSession: Sendable {
         )
 
         guard let routing = configuration.routing else {
+            try await recordAssistantTurn(
+                outcome.output,
+                userMessage: userMessage,
+                outcome: outcome,
+                auth: auth,
+                progress: progress,
+                metadata: metadata
+            )
             return RoutedOutcome(outcome: outcome, appliedSteps: [], lowConfidence: false)
         }
 
@@ -560,6 +681,16 @@ public struct CompoundSession: Sendable {
             )
         }
 
+        // Exactly one recorded turn per routed call, after the final rung:
+        // the escalation ladder produced one answer, not one per attempt.
+        try await recordAssistantTurn(
+            outcome.output,
+            userMessage: userMessage,
+            outcome: outcome,
+            auth: auth,
+            progress: progress,
+            metadata: metadata
+        )
         return RoutedOutcome(
             outcome: outcome,
             appliedSteps: applied,
@@ -574,6 +705,16 @@ public struct CompoundSession: Sendable {
     /// transport comes from ``Configuration/makeModel`` when injected. The
     /// typed loop's extraction phase is bound to the transport's
     /// `respondGenerating` via ``ModelResponding/extractor(_:options:)``.
+    ///
+    /// **Memory is not recorded here.** ``Configuration/memory`` is
+    /// deliberately ignored by this entry point: a typed run's product is
+    /// a structured value, not a transcript turn, and writing
+    /// `String(describing:)` of a decoded struct into conversation
+    /// history would poison both the transcript and the extractive write
+    /// path, whose invariant is that every stored span is verbatim from a
+    /// real message. Callers who want a typed run remembered should
+    /// append the messages they consider canonical to the store
+    /// themselves.
     ///
     /// In ``TypedRunMode/reasonThenExtract`` (the default) the model first
     /// reasons free-form — tools allowed, gated by
@@ -658,7 +799,18 @@ public struct CompoundSession: Sendable {
     /// ``DegradedMode/deterministicOnly`` rung always throws
     /// ``CompoundError/degraded(mode:reason:)`` here: a fallback string is
     /// not a stream, and pretending otherwise would hand callers a
-    /// one-chunk "stream" that never came from a model. Health *signals*
+    /// one-chunk "stream" that never came from a model.
+    ///
+    /// **Memory is not recorded here.** ``Configuration/memory`` is
+    /// deliberately ignored: the output does not exist at this call site —
+    /// it resolves later, through
+    /// ``StreamingControlLoop/Run/outcome`` — so there is no assistant
+    /// turn to append and no completed exchange to hand an observer.
+    /// Callers who want a streamed turn remembered should append the user
+    /// and assistant messages once the outcome resolves, then call their
+    /// observer explicitly.
+    ///
+    /// Health *signals*
     /// are recorded for setup failures only — a streaming run's outcome
     /// resolves after this method returns, and its failures reach the
     /// caller through ``StreamingControlLoop/Run/outcome``.
