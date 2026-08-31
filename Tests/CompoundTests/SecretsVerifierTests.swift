@@ -108,6 +108,14 @@ struct SecretsVerifierTests {
         #expect(verdict.isRepair)
     }
 
+    @Test("secrets default rules compile completely (no silent drops)")
+    func defaultRulesCountRegression() {
+        // Fail-closed: every raw pattern must compile into a rule. The old
+        // compactMap+try? would quietly drop a broken rule and ship a
+        // verifier that stopped detecting that secret class.
+        #expect(SecretsVerifier.defaultRules.count == 24)
+    }
+
     @Test("secrets rejects input that exceeds size limit")
     func rejectsOversized() async throws {
         let v = SecretsVerifier(inputSizeLimit: 1024)

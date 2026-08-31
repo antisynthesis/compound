@@ -10,6 +10,13 @@ public enum ShellToken: Sendable, Equatable {
     case word(String)
     /// A shell operator: `;`, `|`, `||`, `&`, `&&`, `<`, `<<`, `>`, `>>`.
     case op(String)
+    /// A command substitution span — `$(...)` (nesting-aware) or a
+    /// backtick span — carrying the raw inner command text so verifiers
+    /// can recursively re-tokenize and re-gate it. Without this,
+    /// `git log $(rm -rf /)` would sail past a head-based allowlist
+    /// because `$(...)` would otherwise be treated as ordinary word
+    /// characters.
+    case commandSubstitution(inner: String)
 }
 
 /// Errors thrown by ``ShellTokenizer/tokenize(_:)``.
@@ -20,6 +27,10 @@ public enum ShellParseError: Error, Equatable, CustomStringConvertible {
     case unterminatedDoubleQuote
     /// The input ends with a `\` escape with nothing to escape.
     case trailingBackslash
+    /// A `$(` command substitution was not closed by a matching `)`.
+    case unterminatedCommandSubstitution
+    /// A backtick command substitution was not closed.
+    case unterminatedBacktick
 
     /// Human-readable description.
     public var description: String {
@@ -27,6 +38,8 @@ public enum ShellParseError: Error, Equatable, CustomStringConvertible {
         case .unterminatedSingleQuote: return "unterminated single quote"
         case .unterminatedDoubleQuote: return "unterminated double quote"
         case .trailingBackslash: return "trailing backslash"
+        case .unterminatedCommandSubstitution: return "unterminated command substitution"
+        case .unterminatedBacktick: return "unterminated backtick substitution"
         }
     }
 }
@@ -95,6 +108,80 @@ public enum ShellTokenizer {
                 hasCurrent = true
                 current.append(input[next])
                 i = input.index(after: next)
+            case "$":
+                // `$(...)` is command substitution; scan it nesting-aware
+                // and respecting nested quotes. Any other `$` (`$HOME`,
+                // `${VAR}`) is an ordinary word character.
+                let next = input.index(after: i)
+                if next < input.endIndex, input[next] == "(" {
+                    flush()
+                    var depth = 1
+                    var inner = ""
+                    var j = input.index(after: next)
+                    scan: while j < input.endIndex {
+                        let ch = input[j]
+                        switch ch {
+                        case "'":
+                            inner.append(ch)
+                            j = input.index(after: j)
+                            while j < input.endIndex, input[j] != "'" {
+                                inner.append(input[j]); j = input.index(after: j)
+                            }
+                            if j == input.endIndex { throw ShellParseError.unterminatedSingleQuote }
+                            inner.append(input[j]); j = input.index(after: j)
+                        case "\"":
+                            inner.append(ch)
+                            j = input.index(after: j)
+                            while j < input.endIndex, input[j] != "\"" {
+                                if input[j] == "\\" {
+                                    let n = input.index(after: j)
+                                    if n == input.endIndex { throw ShellParseError.trailingBackslash }
+                                    inner.append(input[j]); inner.append(input[n])
+                                    j = input.index(after: n)
+                                } else {
+                                    inner.append(input[j]); j = input.index(after: j)
+                                }
+                            }
+                            if j == input.endIndex { throw ShellParseError.unterminatedDoubleQuote }
+                            inner.append(input[j]); j = input.index(after: j)
+                        case "(":
+                            depth += 1; inner.append(ch); j = input.index(after: j)
+                        case ")":
+                            depth -= 1
+                            if depth == 0 { j = input.index(after: j); break scan }
+                            inner.append(ch); j = input.index(after: j)
+                        default:
+                            inner.append(ch); j = input.index(after: j)
+                        }
+                    }
+                    if depth != 0 { throw ShellParseError.unterminatedCommandSubstitution }
+                    tokens.append(.commandSubstitution(inner: inner))
+                    i = j
+                } else {
+                    hasCurrent = true
+                    current.append(c)
+                    i = input.index(after: i)
+                }
+            case "`":
+                // Backtick command substitution. Backslash escapes the
+                // next character inside the span (POSIX-ish).
+                flush()
+                var inner = ""
+                var j = input.index(after: i)
+                while j < input.endIndex, input[j] != "`" {
+                    if input[j] == "\\" {
+                        let n = input.index(after: j)
+                        if n == input.endIndex { throw ShellParseError.trailingBackslash }
+                        inner.append(input[n])
+                        j = input.index(after: n)
+                    } else {
+                        inner.append(input[j])
+                        j = input.index(after: j)
+                    }
+                }
+                if j == input.endIndex { throw ShellParseError.unterminatedBacktick }
+                tokens.append(.commandSubstitution(inner: inner))
+                i = input.index(after: j)
             case ";":
                 flush()
                 tokens.append(.op(";"))

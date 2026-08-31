@@ -22,6 +22,15 @@ public enum Verdict: Sendable, Equatable {
         if case .pass = self { return true }
         return false
     }
+
+    /// The diagnostic carried by a non-``pass`` verdict, or `nil` for
+    /// ``pass``.
+    public var diagnostic: Diagnostic? {
+        switch self {
+        case .pass: return nil
+        case .repair(let d), .reject(let d), .escalate(let d): return d
+        }
+    }
 }
 
 extension Verdict {
@@ -60,6 +69,25 @@ public struct Diagnostic: Sendable, Equatable, Hashable {
         self.message = message
         self.suggestion = suggestion
         self.location = location
+    }
+
+    /// Folds several diagnostics into one. A single-element list returns
+    /// its element unchanged; multiple elements produce a diagnostic
+    /// attributed to `verifier` (default `"chain"`) whose message is the
+    /// count plus each member's ``summary``. Used by
+    /// ``VerifierChain/Mode/collectAll(maxDiagnostics:)`` when a chain must
+    /// surface several accumulated failures through a single-``Diagnostic``
+    /// ``Verdict`` payload.
+    public static func combined(_ diagnostics: [Diagnostic], verifier: String = "chain") -> Diagnostic {
+        guard let first = diagnostics.first else {
+            return Diagnostic(verifier: verifier, message: "verification failed")
+        }
+        guard diagnostics.count > 1 else { return first }
+        let joined = diagnostics.map(\.summary).joined(separator: "; ")
+        return Diagnostic(
+            verifier: verifier,
+            message: "\(diagnostics.count) verifiers failed: \(joined)"
+        )
     }
 
     /// Single-line summary suitable for logs and UI.

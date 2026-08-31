@@ -20,6 +20,10 @@ public struct JSONSchemaVerifier: Verifier {
     public let maxDepth: Int
     /// Maximum visited node count before validation aborts.
     public let maxNodes: Int
+    /// First `string(pattern:)` in ``schema`` that fails to compile, if
+    /// any. Detected once at init so validation can fail closed instead
+    /// of treating an uncompilable pattern as "no constraint".
+    private let invalidPattern: String?
 
     /// Creates a verifier.
     public init(name: String = "json-schema",
@@ -30,9 +34,46 @@ public struct JSONSchemaVerifier: Verifier {
         self.schema = schema
         self.maxDepth = maxDepth
         self.maxNodes = maxNodes
+        self.invalidPattern = Self.firstInvalidPattern(in: schema)
+    }
+
+    // Walks the schema tree once at init and returns the first regex
+    // pattern that does not compile. A broken pattern used to be silently
+    // skipped at validation time (`try? Regex(...)` -> nil -> no check),
+    // so `{ "x": "\(anything)" }` would pass a schema whose author
+    // intended a strict pattern. Surfacing it up front lets ``verify``
+    // reject rather than pass.
+    static func firstInvalidPattern(in schema: JSONSchema) -> String? {
+        switch schema {
+        case .string(_, _, let pattern):
+            if let pattern, (try? Regex(pattern)) == nil { return pattern }
+            return nil
+        case .array(let items, _, _):
+            return firstInvalidPattern(in: items)
+        case .object(let properties, _, _):
+            for child in properties.values {
+                if let bad = firstInvalidPattern(in: child) { return bad }
+            }
+            return nil
+        case .oneOf(let alternatives):
+            for alt in alternatives {
+                if let bad = firstInvalidPattern(in: alt) { return bad }
+            }
+            return nil
+        case .number, .integer, .boolean, .null, .literal, .any:
+            return nil
+        }
     }
 
     public func verify(_ input: String, context _: RunContext) async throws -> Verdict {
+        // Fail closed on a schema whose pattern could not be compiled:
+        // never report `.pass` for a constraint we were unable to check.
+        if let invalidPattern {
+            return .reject(Diagnostic(
+                verifier: name,
+                message: "internal verifier error: schema pattern failed to compile: \(invalidPattern)"
+            ))
+        }
         guard let data = input.data(using: .utf8) else {
             return .repair(Diagnostic(verifier: name, message: "output is not valid UTF-8"))
         }

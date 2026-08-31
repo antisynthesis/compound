@@ -112,7 +112,17 @@ public struct SecretsVerifier: Verifier, @unchecked Sendable {
             ("putty-private-key", "PuTTY private key block", #"PuTTY-User-Key-File-[0-9]{1,3}:"#),
             ("ssh-private-key-openssh", "OpenSSH private key block", #"-----BEGIN OPENSSH PRIVATE KEY-----"#),
         ]
-        return raw.compactMap { try? SecretRule(id: $0.0, description: $0.1, pattern: $0.2) }
+        // Compile every rule eagerly with `try` and trap on failure. A
+        // pattern that fails to compile is a build-time defect, not an
+        // input to silently tolerate: the previous `compactMap + try?`
+        // would drop the broken rule and ship a verifier that quietly
+        // stopped detecting that class of secret (fail-open). Crashing
+        // here — or surfacing the throw — keeps the rule set intact.
+        do {
+            return try raw.map { try SecretRule(id: $0.0, description: $0.1, pattern: $0.2) }
+        } catch {
+            fatalError("SecretsVerifier.defaultRules contains an uncompilable pattern: \(error)")
+        }
     }()
 
     public func verify(_ input: String, context _: RunContext) async throws -> Verdict {
@@ -125,8 +135,18 @@ public struct SecretsVerifier: Verifier, @unchecked Sendable {
         }
         var matched: [String] = []
         for rule in rules {
-            if (try? rule.pattern.firstMatch(in: input)) != nil {
-                matched.append(rule.id)
+            do {
+                if try rule.pattern.firstMatch(in: input) != nil {
+                    matched.append(rule.id)
+                }
+            } catch {
+                // A regex engine error mid-scan is an internal fault, not
+                // a clean "no match" — fail closed rather than passing
+                // potentially secret-laden output through.
+                return .reject(Diagnostic(
+                    verifier: name,
+                    message: "internal verifier error: secret rule '\(rule.id)' failed to evaluate: \(error)"
+                ))
             }
         }
         if matched.isEmpty { return .pass }

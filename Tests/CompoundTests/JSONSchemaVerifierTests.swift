@@ -106,6 +106,28 @@ struct JSONSchemaVerifierTests {
         }
     }
 
+    @Test("schema fails closed on an uncompilable pattern")
+    func failsClosedOnBadPattern() async throws {
+        // An invalid regex used to be skipped (treated as no constraint),
+        // so any string passed. It must now reject with an internal error.
+        let schema: JSONSchema = .string(pattern: "(")
+        let v = JSONSchemaVerifier(schema: schema)
+        let verdict = try await v.verify("\"whatever\"", context: RunContext())
+        if case .reject(let d) = verdict {
+            #expect(d.message.contains("internal verifier error"))
+        } else {
+            Issue.record("expected .reject for uncompilable pattern, got \(verdict)")
+        }
+    }
+
+    @Test("schema still enforces a valid nested pattern")
+    func enforcesValidNestedPattern() async throws {
+        let schema: JSONSchema = .object(properties: ["email": .string(pattern: #".+@.+"#)], required: ["email"])
+        let v = JSONSchemaVerifier(schema: schema)
+        #expect((try await v.verify(#"{"email":"a@b"}"#, context: RunContext())).isPass)
+        #expect((try await v.verify(#"{"email":"nope"}"#, context: RunContext())).isRepair)
+    }
+
     @Test("schema rejects when node budget exceeded")
     func rejectsNodeBudget() async throws {
         var parts: [String] = []

@@ -24,6 +24,10 @@ public struct ShellAllowListVerifier: Verifier {
     /// When `true`, shells and interpreters in ``inspectionEscapes`` are
     /// permitted as long as their name is in ``allowed``.
     public let allowShellEscapes: Bool
+    /// Maximum command-substitution recursion depth before the verifier
+    /// rejects on overflow (fail-closed). Guards against deeply nested
+    /// `$( $( ... ) )` spans.
+    public let maxRecursionDepth: Int
 
     /// Commands that take user-controlled code or strings to execute.
     /// Each of these would let an attacker smuggle an off-list command
@@ -40,18 +44,36 @@ public struct ShellAllowListVerifier: Verifier {
     /// Creates a verifier.
     public init(name: String = "shell-allowlist",
                 allowed: Set<String>,
-                allowShellEscapes: Bool = false) {
+                allowShellEscapes: Bool = false,
+                maxRecursionDepth: Int = 8) {
         self.name = name
         self.allowed = allowed
         self.allowShellEscapes = allowShellEscapes
+        self.maxRecursionDepth = maxRecursionDepth
     }
 
-    public func verify(_ input: String, context _: RunContext) async throws -> Verdict {
+    public func verify(_ input: String, context: RunContext) async throws -> Verdict {
+        try await verify(input, context: context, depth: 0)
+    }
+
+    private func verify(_ input: String, context: RunContext, depth: Int) async throws -> Verdict {
+        if depth > maxRecursionDepth {
+            return .reject("shell command substitution nested too deeply (> \(maxRecursionDepth))")
+        }
         let tokens: [ShellToken]
         do {
             tokens = try ShellTokenizer.tokenize(input)
         } catch {
             return .reject("malformed shell command: \(error)")
+        }
+        // Command substitutions (`$(...)`, backticks) run their inner
+        // command with the same privileges, so gate each one recursively
+        // using the CALLER'S context — not a detached fabricated one.
+        for token in tokens {
+            if case .commandSubstitution(let inner) = token {
+                let innerVerdict = try await verify(inner, context: context, depth: depth + 1)
+                if case .reject = innerVerdict { return innerVerdict }
+            }
         }
         let segments = ShellTokenizer.commands(tokens)
         if segments.isEmpty {
@@ -96,6 +118,9 @@ public struct ShellDangerousFlagsVerifier: Verifier {
     public let cost: VerifierCost = .parse
     /// Active danger rules.
     public let rules: [DangerRule]
+    /// Maximum wrapper/command-substitution recursion depth before the
+    /// verifier rejects on overflow (fail-closed).
+    public let maxRecursionDepth: Int
 
     /// One named pattern evaluated against a tokenized segment.
     public struct DangerRule: Sendable {
@@ -115,9 +140,10 @@ public struct ShellDangerousFlagsVerifier: Verifier {
     }
 
     /// Creates a verifier. Defaults to ``defaultRules``.
-    public init(name: String = "shell-danger", rules: [DangerRule]? = nil) {
+    public init(name: String = "shell-danger", rules: [DangerRule]? = nil, maxRecursionDepth: Int = 8) {
         self.name = name
         self.rules = rules ?? Self.defaultRules
+        self.maxRecursionDepth = maxRecursionDepth
     }
 
     // Targets so broad that `rm -rf` against them is almost never the
@@ -240,7 +266,14 @@ public struct ShellDangerousFlagsVerifier: Verifier {
         },
     ]
 
-    public func verify(_ input: String, context _: RunContext) async throws -> Verdict {
+    public func verify(_ input: String, context: RunContext) async throws -> Verdict {
+        try await verify(input, context: context, depth: 0)
+    }
+
+    private func verify(_ input: String, context: RunContext, depth: Int) async throws -> Verdict {
+        if depth > maxRecursionDepth {
+            return .reject("shell command nested too deeply (> \(maxRecursionDepth))")
+        }
         let tokens: [ShellToken]
         do {
             tokens = try ShellTokenizer.tokenize(input)
@@ -258,6 +291,18 @@ public struct ShellDangerousFlagsVerifier: Verifier {
             return .reject(redirDanger)
         }
 
+        // Command substitutions (`$(...)`, backticks) execute their inner
+        // command with the same privileges. Re-tokenize and re-run the
+        // danger rules on each, threading the CALLER'S context so tracing
+        // and cancellation stay attached (the recursion is no longer
+        // detached behind a fabricated RunContext()).
+        for token in tokens {
+            if case .commandSubstitution(let inner) = token {
+                let innerVerdict = try await verify(inner, context: context, depth: depth + 1)
+                if case .reject = innerVerdict { return innerVerdict }
+            }
+        }
+
         let segments = ShellTokenizer.commands(tokens)
         for segment in segments {
             // Inspection-escape recursion: if the head is a shell or
@@ -266,7 +311,7 @@ public struct ShellDangerousFlagsVerifier: Verifier {
             // danger rules on it. Without this, head-only matching misses
             // every wrapped command in H3.
             if let inner = Self.unwrappedInnerCommand(segment) {
-                let innerVerdict = try await self.verify(inner, context: RunContext())
+                let innerVerdict = try await verify(inner, context: context, depth: depth + 1)
                 if case .reject = innerVerdict { return innerVerdict }
             }
             for rule in rules {
@@ -364,21 +409,36 @@ public struct ShellDangerousFlagsVerifier: Verifier {
     private static func detectFetchPipeShell(_ tokens: [ShellToken]) -> String? {
         let fetchers: Set<String> = ["curl", "wget", "fetch"]
         let shells: Set<String> = ["sh", "bash", "zsh", "ksh", "dash"]
+        // Wrappers that can sit between the pipe and the shell —
+        // `curl ... | sudo sh`, `curl ... | env sh`, `curl ... | nice bash`.
+        let wrappers: Set<String> = [
+            "env", "sudo", "doas", "nice", "ionice",
+            "nohup", "setsid", "stdbuf", "time", "timeout",
+        ]
         var sawFetcher = false
         var expectShell = false
         for token in tokens {
             switch token {
             case .word(let w):
                 let base = (w as NSString).lastPathComponent
-                if fetchers.contains(base) { sawFetcher = true }
-                if expectShell && shells.contains(base) {
-                    return "piping fetched content directly to a shell"
+                if expectShell {
+                    if shells.contains(base) {
+                        return "piping fetched content directly to a shell"
+                    }
+                    // Look through wrapper words and their flags/assignments
+                    // without giving up on the pipe target.
+                    if wrappers.contains(base) { continue }
+                    if w.hasPrefix("-") { continue }
+                    if w.contains("=") && !w.hasPrefix("=") { continue }
+                    expectShell = false
                 }
-                expectShell = false
+                if fetchers.contains(base) { sawFetcher = true }
             case .op(let op):
                 if op == "|" && sawFetcher {
                     expectShell = true
                 }
+            case .commandSubstitution:
+                expectShell = false
             }
         }
         return nil
@@ -398,6 +458,8 @@ public struct ShellDangerousFlagsVerifier: Verifier {
                     }
                     expectTarget = false
                 }
+            case .commandSubstitution:
+                expectTarget = false
             }
         }
         return nil

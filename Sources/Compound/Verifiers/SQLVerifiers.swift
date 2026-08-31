@@ -176,11 +176,25 @@ public enum SQLTokenizer {
                 tokens.append(.identifier(s))
                 continue
             }
-            // Number
+            // Number. A leading sign is never consumed here (it is a
+            // separate operator), and `+`/`-` are only absorbed as an
+            // exponent sign immediately after `e`/`E`. Without this the
+            // lexer would greedily swallow `1-2` into a single number
+            // token and hide the `-` operator from downstream analysis.
             if c.isNumber {
                 var s = ""
-                while i < chars.count, (chars[i].isNumber || chars[i] == "." || chars[i] == "e" || chars[i] == "E" || chars[i] == "+" || chars[i] == "-") {
-                    s.append(chars[i]); i += 1
+                while i < chars.count {
+                    let ch = chars[i]
+                    if ch.isNumber || ch == "." {
+                        s.append(ch); i += 1
+                    } else if ch == "e" || ch == "E" {
+                        s.append(ch); i += 1
+                        if i < chars.count, chars[i] == "+" || chars[i] == "-" {
+                            s.append(chars[i]); i += 1
+                        }
+                    } else {
+                        break
+                    }
                 }
                 tokens.append(.number(s))
                 continue
@@ -223,16 +237,49 @@ public enum SQLTokenizer {
         return out
     }
 
-    /// Returns the ``SQLStatementKind`` matching the first keyword in
-    /// `statement`, or ``SQLStatementKind/unknown``.
+    /// Classifies `statement` by the **most privileged** verb keyword
+    /// appearing at the top level (parenthesis depth 0). Keying on the
+    /// first keyword alone let `WITH x AS (SELECT 1) DELETE FROM t` and
+    /// `EXPLAIN ANALYZE DELETE FROM t` masquerade as harmless `with` /
+    /// `explain` statements; scanning every top-level verb and returning
+    /// the most destructive one closes that bypass. Keywords inside
+    /// parentheses (subqueries, CTE bodies) are ignored so a nested
+    /// `SELECT` never lowers the classification of the outer statement.
     public static func classify(_ statement: [SQLToken]) -> SQLStatementKind {
+        var depth = 0
+        var best: SQLStatementKind?
+        var bestRank = Int.min
         for token in statement {
-            if case .keyword(let k) = token {
-                return SQLStatementKind(rawValue: k) ?? .unknown
+            switch token {
+            case .op(let o):
+                if o == "(" { depth += 1 } else if o == ")" { depth = max(0, depth - 1) }
+            case .keyword(let k) where depth == 0:
+                if let kind = SQLStatementKind(rawValue: k) {
+                    let rank = privilegeRank[kind] ?? 0
+                    if rank > bestRank { bestRank = rank; best = kind }
+                }
+            default:
+                break
             }
         }
-        return .unknown
+        return best ?? .unknown
     }
+
+    /// Ordering used by ``classify(_:)`` — higher is more privileged, so
+    /// the most destructive verb present wins. Only statement-verb
+    /// keywords appear; other keywords (`from`, `where`, ...) never map
+    /// to a ``SQLStatementKind`` and are ignored.
+    static let privilegeRank: [SQLStatementKind: Int] = [
+        .drop: 100, .truncate: 95,
+        .delete: 90, .update: 85, .insert: 80,
+        .alter: 75, .create: 70,
+        .grant: 65, .revoke: 60,
+        .set: 40,
+        .select: 30,
+        .with: 20, .explain: 15,
+        .begin: 10, .commit: 10, .rollback: 10,
+        .unknown: 0,
+    ]
 
     /// `true` if `statement` contains the supplied (case-insensitive) keyword.
     public static func containsKeyword(_ keyword: String, in statement: [SQLToken]) -> Bool {
