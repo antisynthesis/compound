@@ -11,7 +11,7 @@ public protocol EvalPredicate: Sendable {
 }
 
 /// Result of evaluating one ``EvalPredicate``.
-public struct EvalCheck: Sendable, Equatable {
+public struct EvalCheck: Sendable, Equatable, Codable {
     /// `true` if the check passed.
     public let passed: Bool
     /// Optional failure message (or supplemental note on pass).
@@ -77,8 +77,12 @@ public struct MatchesRegexPredicate: EvalPredicate, @unchecked Sendable {
         self.pattern = pattern
         self.regex = try Regex(pattern)
     }
+    /// Matches `output` against the pattern. Regex *engine* errors (e.g.
+    /// exceeding resource limits on pathological input) are rethrown so the
+    /// runner records the case's check as errored, rather than being
+    /// silently misreported as "did not match".
     public func evaluate(output: String, runContext _: RunContext) async throws -> EvalCheck {
-        ((try? regex.firstMatch(in: output)) != nil) ? .pass : .fail("output does not match /\(pattern)/")
+        try regex.firstMatch(in: output) != nil ? .pass : .fail("output does not match /\(pattern)/")
     }
 }
 

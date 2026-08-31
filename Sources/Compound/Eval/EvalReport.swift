@@ -1,12 +1,19 @@
 import Foundation
+import FoundationModels
 
 /// Summarizes a run of an ``EvalSuite``.
 ///
-/// Each case has either a `completed` result (model produced an output
-/// and predicates were checked) or an `errored` result (the run itself
-/// threw — model unavailable, budget exhausted, etc.). Both are
-/// surfaced; the harness never swallows failures.
-public struct EvalReport: Sendable {
+/// Each case has a `completed` result (model produced an output and
+/// predicates were checked), an `errored` result (the run itself threw —
+/// model unavailable, budget exhausted, etc.), or a `timedOut` result (the
+/// runner's per-case deadline elapsed). All are surfaced; the harness never
+/// swallows failures.
+///
+/// Reports are `Codable`: durations are encoded as integer nanoseconds and
+/// dates encode with whatever strategy the encoder is configured with
+/// (``jsonData(prettyPrinted:)`` uses ISO 8601), so a CI baseline can be
+/// serialized, stored, and later compared with ``EvalGate``.
+public struct EvalReport: Sendable, Codable {
     /// Suite name (from ``EvalSuite/name``).
     public let suiteName: String
     /// Wall-clock instant the run started.
@@ -15,30 +22,138 @@ public struct EvalReport: Sendable {
     public let finished: Date
     /// Per-case outcomes in evaluation order.
     public let cases: [CaseOutcome]
+    /// Snapshot of the machine the run executed on, if recorded.
+    public let environment: Environment?
+
+    /// Snapshot of the execution environment, recorded so a stored
+    /// baseline can be interpreted later ("was the model even available
+    /// on that runner?").
+    public struct Environment: Sendable, Codable, Equatable {
+        /// Operating system version string of the host.
+        public let osVersion: String
+        /// Availability of the on-device `SystemLanguageModel` at run
+        /// start ("available" or the unavailability reason).
+        public let modelAvailability: String
+
+        /// Creates an environment snapshot.
+        public init(osVersion: String, modelAvailability: String) {
+            self.osVersion = osVersion
+            self.modelAvailability = modelAvailability
+        }
+
+        /// Captures the current host's environment.
+        public static func current() -> Environment {
+            let availability: String
+            switch SystemLanguageModel.default.availability {
+            case .available:
+                availability = "available"
+            case .unavailable(let reason):
+                availability = "unavailable: \(reason)"
+            }
+            return Environment(
+                osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+                modelAvailability: availability
+            )
+        }
+    }
 
     /// Outcome of evaluating a single ``EvalCase``.
-    public struct CaseOutcome: Sendable {
+    public struct CaseOutcome: Sendable, Codable {
         /// Identifier of the originating case.
         public let caseID: String
         /// Prompt used.
         public let prompt: String
+        /// The ``RunContext/runID`` the case executed under, for
+        /// correlating report rows with trace events.
+        public let runID: UUID
         /// Outcome.
         public let result: Result
 
-        /// Either a completed case with predicate checks, or a run error.
-        public enum Result: Sendable {
+        /// Creates a case outcome.
+        public init(caseID: String, prompt: String, runID: UUID, result: Result) {
+            self.caseID = caseID
+            self.prompt = prompt
+            self.runID = runID
+            self.result = result
+        }
+
+        /// A completed case with predicate checks, a run error, or a
+        /// per-case deadline expiry.
+        public enum Result: Sendable, Codable {
             /// The run produced `output`; `checks` are predicate outcomes.
             case completed(output: String, checks: [PredicateOutcome], elapsed: Duration)
             /// The run threw `reason` before producing an output.
             case errored(reason: String, elapsed: Duration)
+            /// The runner's ``EvalRunner/caseTimeout`` elapsed before the
+            /// target responded; the case was cancelled.
+            case timedOut(elapsed: Duration)
+
+            private enum CodingKeys: String, CodingKey {
+                case kind, output, checks, reason, elapsedNanoseconds
+            }
+
+            private enum Kind: String, Codable {
+                case completed, errored, timedOut
+            }
+
+            public init(from decoder: any Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                let kind = try container.decode(Kind.self, forKey: .kind)
+                let nanos = try container.decode(Int64.self, forKey: .elapsedNanoseconds)
+                let elapsed = Duration.nanoseconds(nanos)
+                switch kind {
+                case .completed:
+                    self = .completed(
+                        output: try container.decode(String.self, forKey: .output),
+                        checks: try container.decode([PredicateOutcome].self, forKey: .checks),
+                        elapsed: elapsed
+                    )
+                case .errored:
+                    self = .errored(
+                        reason: try container.decode(String.self, forKey: .reason),
+                        elapsed: elapsed
+                    )
+                case .timedOut:
+                    self = .timedOut(elapsed: elapsed)
+                }
+            }
+
+            public func encode(to encoder: any Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                switch self {
+                case .completed(let output, let checks, let elapsed):
+                    try container.encode(Kind.completed, forKey: .kind)
+                    try container.encode(output, forKey: .output)
+                    try container.encode(checks, forKey: .checks)
+                    try container.encode(Self.nanoseconds(of: elapsed), forKey: .elapsedNanoseconds)
+                case .errored(let reason, let elapsed):
+                    try container.encode(Kind.errored, forKey: .kind)
+                    try container.encode(reason, forKey: .reason)
+                    try container.encode(Self.nanoseconds(of: elapsed), forKey: .elapsedNanoseconds)
+                case .timedOut(let elapsed):
+                    try container.encode(Kind.timedOut, forKey: .kind)
+                    try container.encode(Self.nanoseconds(of: elapsed), forKey: .elapsedNanoseconds)
+                }
+            }
+
+            private static func nanoseconds(of duration: Duration) -> Int64 {
+                let (seconds, attoseconds) = duration.components
+                return seconds * 1_000_000_000 &+ attoseconds / 1_000_000_000
+            }
         }
 
         /// One predicate's contribution to a `completed` outcome.
-        public struct PredicateOutcome: Sendable {
+        public struct PredicateOutcome: Sendable, Codable {
             /// Predicate name.
             public let name: String
             /// Result of the predicate.
             public let check: EvalCheck
+
+            /// Creates a predicate outcome.
+            public init(name: String, check: EvalCheck) {
+                self.name = name
+                self.check = check
+            }
         }
 
         /// `true` if the case completed and every predicate passed.
@@ -46,7 +161,7 @@ public struct EvalReport: Sendable {
             switch result {
             case .completed(_, let checks, _):
                 return checks.allSatisfy { $0.check.passed }
-            case .errored:
+            case .errored, .timedOut:
                 return false
             }
         }
@@ -62,11 +177,34 @@ public struct EvalReport: Sendable {
     public var elapsed: Duration { .seconds(finished.timeIntervalSince(started)) }
 
     /// Creates a report.
-    public init(suiteName: String, started: Date, finished: Date, cases: [CaseOutcome]) {
+    public init(
+        suiteName: String,
+        started: Date,
+        finished: Date,
+        cases: [CaseOutcome],
+        environment: Environment? = nil
+    ) {
         self.suiteName = suiteName
         self.started = started
         self.finished = finished
         self.cases = cases
+        self.environment = environment
+    }
+
+    /// Encodes the report as JSON with ISO 8601 dates and sorted keys, so
+    /// stored baselines diff cleanly.
+    public func jsonData(prettyPrinted: Bool = true) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = prettyPrinted ? [.prettyPrinted, .sortedKeys] : [.sortedKeys]
+        return try encoder.encode(self)
+    }
+
+    /// Decodes a report previously produced by ``jsonData(prettyPrinted:)``.
+    public init(jsonData: Data) throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        self = try decoder.decode(EvalReport.self, from: jsonData)
     }
 
     /// Human-readable single-line summary suitable for CI logs.
@@ -93,9 +231,10 @@ public struct EvalReport: Sendable {
                 }
             case .errored(let reason, _):
                 out += "  ERR \(c.caseID): \(reason)\n"
+            case .timedOut(let elapsed):
+                out += "  TIMEOUT \(c.caseID) after \(elapsed)\n"
             }
         }
         return out
     }
 }
-
