@@ -22,6 +22,12 @@ public struct RunContext: Sendable {
     public let metadata: [String: String]
     /// Wall-clock instant the run was constructed.
     public let startedAt: Date
+    /// Shared per-run tool-invocation counter. ``VerifiedTool`` records every
+    /// invocation here (throwing mid-turn when the cap trips) and the control
+    /// loop folds its count into ``BudgetUsage`` each turn. Defaults to an
+    /// unlimited meter; pass `ToolCallMeter(limit: budget.maxToolCalls)` to
+    /// enforce ``Budget/maxToolCalls``.
+    public let toolCallMeter: ToolCallMeter
 
     /// Creates a run context. Every parameter has a safe default so call
     /// sites can spin up an anonymous, untraced run in one line.
@@ -31,7 +37,8 @@ public struct RunContext: Sendable {
         tracer: any Tracer = NullTracer(),
         progress: any ProgressReporter = NullProgressReporter(),
         metadata: [String: String] = [:],
-        startedAt: Date = Date()
+        startedAt: Date = Date(),
+        toolCallMeter: ToolCallMeter = ToolCallMeter()
     ) {
         self.runID = runID
         self.auth = auth
@@ -39,6 +46,7 @@ public struct RunContext: Sendable {
         self.progress = progress
         self.metadata = metadata
         self.startedAt = startedAt
+        self.toolCallMeter = toolCallMeter
     }
 
     /// Returns a copy of this context with additional metadata merged in.
@@ -52,7 +60,8 @@ public struct RunContext: Sendable {
             tracer: tracer,
             progress: progress,
             metadata: merged,
-            startedAt: startedAt
+            startedAt: startedAt,
+            toolCallMeter: toolCallMeter
         )
     }
 }

@@ -64,16 +64,21 @@ public protocol RetryClassifier: Sendable {
     func isTransient(_ error: any Error) -> Bool
 }
 
-/// Default classifier. Treats common `URLError` connectivity hiccups and
-/// ``CompoundError/modelUnavailable(reason:)`` as transient; everything
-/// else is terminal. Callers can extend this by composing with a
+/// Default classifier. Treats common `URLError` connectivity hiccups,
+/// ``CompoundError/modelRateLimited``, and *retryable* model
+/// unavailability (model still downloading / assets not ready) as
+/// transient; everything else is terminal. ``CompoundError/underlying(_:)``
+/// wrappers are unwrapped recursively before classification, so a
+/// `URLError` that crossed the ``ModelClient`` boundary is still
+/// recognized. Callers can extend this by composing with a
 /// domain-specific classifier through ``UnionRetryClassifier``.
 public struct DefaultRetryClassifier: RetryClassifier {
     /// Creates an instance.
     public init() {}
-    /// Returns `true` for URL/transport hiccups and model-unavailable
-    /// errors.
+    /// Returns `true` for URL/transport hiccups, model rate limiting, and
+    /// retryable model unavailability.
     public func isTransient(_ error: any Error) -> Bool {
+        let error = Self.unwrap(error)
         if let urlError = error as? URLError {
             switch urlError.code {
             case .timedOut, .cannotConnectToHost, .networkConnectionLost,
@@ -84,10 +89,38 @@ public struct DefaultRetryClassifier: RetryClassifier {
                 return false
             }
         }
-        if let compoundError = error as? CompoundError, case .modelUnavailable = compoundError {
-            return true
+        if let compoundError = error as? CompoundError {
+            switch compoundError {
+            case .modelRateLimited:
+                return true
+            case .modelUnavailable(let reason):
+                return Self.isRetryableUnavailability(reason)
+            default:
+                return false
+            }
         }
         return false
+    }
+
+    /// Recursively unwraps ``CompoundError/underlying(_:)`` so the checks
+    /// above see the innermost error.
+    static func unwrap(_ error: any Error) -> any Error {
+        var current = error
+        while let compound = current as? CompoundError, case .underlying(let inner) = compound {
+            current = inner
+        }
+        return current
+    }
+
+    /// Splits ``CompoundError/modelUnavailable(reason:)`` by reason: a model
+    /// that is still downloading (`modelNotReady`, missing assets) is worth
+    /// retrying; an ineligible device or disabled Apple Intelligence never
+    /// is. The reason strings originate in ``ModelClient``.
+    static func isRetryableUnavailability(_ reason: String) -> Bool {
+        let lowered = reason.lowercased()
+        return lowered.contains("not ready")
+            || lowered.contains("downloading")
+            || lowered.contains("assets unavailable")
     }
 }
 

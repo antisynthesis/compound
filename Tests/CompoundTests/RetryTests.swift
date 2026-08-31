@@ -84,6 +84,52 @@ struct RetryTests {
         }
     }
 
+    @Test("DefaultRetryClassifier unwraps .underlying to find a transient URLError")
+    func classifierUnwrapsUnderlying() {
+        let classifier = DefaultRetryClassifier()
+        let transient = URLError(.timedOut)
+        #expect(classifier.isTransient(transient))
+        #expect(classifier.isTransient(CompoundError.underlying(transient)))
+        // Nested wrapping is unwrapped recursively.
+        #expect(classifier.isTransient(CompoundError.underlying(CompoundError.underlying(transient))))
+        // A terminal URLError stays terminal through the wrapper.
+        #expect(!classifier.isTransient(CompoundError.underlying(URLError(.badURL))))
+    }
+
+    @Test("DefaultRetryClassifier treats .modelRateLimited as transient and terminal model errors as terminal")
+    func classifierModelErrorClasses() {
+        let classifier = DefaultRetryClassifier()
+        #expect(classifier.isTransient(CompoundError.modelRateLimited))
+        #expect(classifier.isTransient(CompoundError.underlying(CompoundError.modelRateLimited)))
+        #expect(!classifier.isTransient(CompoundError.guardrailViolation(context: "blocked")))
+        #expect(!classifier.isTransient(CompoundError.refusal(nil)))
+        #expect(!classifier.isTransient(CompoundError.unsupportedLanguage))
+        #expect(!classifier.isTransient(CompoundError.contextWindowExceeded(promptTokens: nil)))
+        #expect(!classifier.isTransient(CancellationError()))
+    }
+
+    @Test("DefaultRetryClassifier splits modelUnavailable by reason")
+    func classifierSplitsModelUnavailable() {
+        let classifier = DefaultRetryClassifier()
+        // modelNotReady is worth a retry — the model is still downloading.
+        #expect(classifier.isTransient(
+            CompoundError.modelUnavailable(reason: "model not ready (still downloading)")
+        ))
+        #expect(classifier.isTransient(
+            CompoundError.modelUnavailable(reason: "model assets unavailable — fetching")
+        ))
+        // deviceNotEligible / Apple Intelligence disabled never resolve by retrying.
+        #expect(!classifier.isTransient(
+            CompoundError.modelUnavailable(reason: "device not eligible for Apple Intelligence")
+        ))
+        #expect(!classifier.isTransient(
+            CompoundError.modelUnavailable(reason: "Apple Intelligence not enabled")
+        ))
+        #expect(!classifier.isTransient(
+            CompoundError.modelUnavailable(reason: "unavailable (unknown reason)")
+        ))
+    }
+
     @Test("retry honors cancellation between attempts")
     func honorsCancellation() async throws {
         actor Counter { var n = 0; func bump() -> Int { n += 1; return n } }
