@@ -34,7 +34,7 @@ struct CodeEditAgent {
         ]
 
         var toolRegistry = ToolRegistry()
-        toolRegistry.register(
+        try toolRegistry.register(
             EditTool(),
             requiredScopes: ["files:edit"],
             argumentVerifiers: editArgVerifiers

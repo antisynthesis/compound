@@ -62,11 +62,16 @@ struct Demo {
         ])
 
         var tools = ToolRegistry()
-        tools.register(
-            GetWeatherTool(),
-            requiredScopes: ["weather.read"],
-            argumentVerifiers: [cityArgsVerifier]
-        )
+        do {
+            try tools.register(
+                GetWeatherTool(),
+                requiredScopes: ["weather.read"],
+                argumentVerifiers: [cityArgsVerifier]
+            )
+        } catch {
+            print("failed to register tool: \(error)")
+            return
+        }
 
         let assembler: any ContextAssembler
         do {

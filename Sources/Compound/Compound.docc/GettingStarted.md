@@ -63,7 +63,7 @@ Tools are deterministic actions the model can request. Compound wraps every tool
 
 ```swift
 var registry = ToolRegistry()
-registry.register(
+try registry.register(
     YourFoundationModelsTool(),
     requiredScopes: ["files:read"],
     argumentVerifiers: [
@@ -120,7 +120,7 @@ let suite = EvalSuite(name: "smoke", cases: [
     ),
 ])
 
-let report = await EvalRunner().run(suite, against: session)
+let report = try await EvalRunner().run(suite, against: session)
 print(report.detailedReport())
 ```
 

@@ -140,7 +140,7 @@ flowchart TD
 
 ### Context assembly
 
-`DefaultContextAssembler` and `ConversationContextAssembler` compose instructions, retrieved sources, prior turns, redactors, and policy gates. `TokenBudgetedAssembler` wraps any assembler to fit a soft token budget.
+`DefaultContextAssembler` and `ConversationContextAssembler` compose instructions, retrieved sources, prior turns, redactors, and policy gates. Redactors scan retrieved sources and stored history as well as the user prompt by default (`RedactionScope.all`), and rendered prompts fence untrusted content in `<source>` / `<message>` blocks with escaping, so injected citation lines and forged `User:` turns stay inert. `TokenBudgetedAssembler` wraps any assembler to fit a soft token budget.
 
 Retrieval kit:
 
@@ -164,33 +164,35 @@ Cancellation propagates. Cancelling the stream cancels the producer.
 
 `VerifiedTool<Wrapped>` wraps any `FoundationModels.Tool` so every invocation is gated by:
 
-1. A policy decision against the caller's `AuthContext`
-2. A chain of `Verifier`s run against the decoded arguments
-3. Full observability through the run's `Tracer`
+1. The run's tool-call budget (`Budget.maxToolCalls`, metered mid-turn)
+2. A policy decision against the caller's `AuthContext`
+3. A chain of `Verifier`s run against the decoded arguments
+4. A chain of `Verifier`s run against the tool's output before it re-enters the model context (closing the indirect prompt-injection channel — rejected outputs are withheld)
+5. Full observability through the run's `Tracer`
 
-`ToolRegistry` collects tools with required scopes and argument verifiers; per-run instantiation binds them to the live `RunContext`.
+`ToolRegistry` collects tools with required scopes, argument verifiers, and output verifiers; per-run instantiation binds them to the live `RunContext`. Registration throws on duplicate tool names.
 
 ### Verifier kit
 
-`Verifier<Input>` is the deterministic disposer. The cost ladder (`parse < schema < types < lint < unitTest < integrationTest < proof < human`) drives `VerifierChain` ordering: cheapest first, short-circuit on the first non-pass.
+`Verifier<Input>` is the deterministic disposer. The cost ladder (`parse < schema < types < lint < unitTest < integrationTest < proof < human`) drives `VerifierChain` ordering: cheapest first (deterministic `(cost, name)` sort), short-circuit on the first non-pass by default, or `Mode.collectAll` to fold every repair diagnostic into a single repair round.
 
-Around 40 verifier types ship with the framework, totaling 100-plus built-in detection rules (the `SecretsVerifier` alone carries 21 default credential patterns; the path and shell deny lists carry dozens). They cover:
+Around 40 verifier types ship with the framework, totaling 100-plus built-in detection rules (the `SecretsVerifier` alone carries 24 default credential patterns; the path and shell deny lists carry dozens). They cover:
 
 | Concern | Verifiers |
 |---|---|
 | File edits (Claude Code style) | `ExactMatchEditVerifier`, `NoOpEditVerifier`, `EditAppliedVerifier` |
 | Paths | `PathSafetyVerifier` (percent-decodes, NFC-normalizes, case-folds before workspace check), `PathDenyListVerifier` (defaults block `.git`, `.env`, SSH keys, AWS creds, `.aws/`, `.kube/`, kubeconfig, `.docker/config.json`, gcloud, `.npmrc`, `.pypirc`, service-account JSON, `*.tfstate`, `.terraformrc`, `.netrc`, PEM) |
-| Shell | `ShellAllowListVerifier` (rejects `bash`/`sh`/`python`/`node`/`env`/`xargs`/`time`/`ssh`/`timeout` inspection escapes and `find -exec/-delete` unless opted in), `ShellDangerousFlagsVerifier` (case-insensitive `rm -rf` with long-flag forms, expanded target set including `/Users`, `/System`, `/Library`, `$HOME`/`$PWD`, sudo, git --no-verify/--force, curl\|sh, dd to raw devices) |
+| Shell | `ShellAllowListVerifier` (rejects `bash`/`sh`/`python`/`node`/`env`/`xargs`/`time`/`ssh`/`timeout` inspection escapes and `find -exec/-delete` unless opted in), `ShellDangerousFlagsVerifier` (case-insensitive `rm -rf` with long-flag forms, expanded target set including `/Users`, `/System`, `/Library`, `$HOME`/`$PWD`, sudo, git --no-verify/--force, curl\|sh — seen through `env`/`sudo`/`nice` wrappers — dd to raw devices); both recursively re-gate `$(...)` and backtick command substitutions, depth-capped |
 | Diffs | `UnifiedDiffParseVerifier` |
 | Structure | `EncodingVerifier`, `BalancedBracketsVerifier`, `LineCountVerifier` |
 | Typed JSON | `JSONSchemaVerifier` (subset: string/number/integer/bool/null/literal/array/object/oneOf, with `maxDepth` and `maxNodes` budgets) |
 | URLs | `URLSafetyVerifier` (HTTPS-only, host allow/block, `inet_pton`-canonicalized IPs, octal/hex/decimal-integer IP forms, IPv4-mapped IPv6, CGNAT, NAT64, Teredo, ULA, link-local, IDN homograph rejection) |
 | Compile gates | `SwiftCommandVerifier`, `SwiftSnippetTypecheckVerifier` (via stub-able `ProcessRunner`) |
-| Credentials | `SecretsVerifier` (21 default rules: AWS, GitHub × 5 including `ghr_`, Slack × 2, Anthropic plus `sk-ant-admin01-`, OpenAI plus `sk-svcacct-`, Google, Stripe × 2, npm, SendGrid, Twilio, JWT, PEM/OpenSSH/PuTTY private keys; bounded quantifiers and `inputSizeLimit`) |
+| Credentials | `SecretsVerifier` (24 default rules: AWS × 2, GitHub × 6 including `ghr_`, Slack × 2, Anthropic plus `sk-ant-admin01-`, OpenAI plus `sk-svcacct-`, Google, Stripe × 2, npm, SendGrid, Twilio, JWT, PEM/OpenSSH/PuTTY private keys; bounded quantifiers, `inputSizeLimit`, and rules that fail closed if a pattern won't compile) |
 | PII | `PIIVerifier` (regex+Luhn), `NSDataDetectorPIIVerifier` (Apple-native phone/address/date/link) |
 | Format | `UUIDVerifier`, `ISO8601DateVerifier`, `SemVerVerifier`, `EmailVerifier`, `PhoneE164Verifier`, `HexStringVerifier`, `Base64Verifier` |
 | Numeric | `NumericRangeVerifier`, `ProbabilityVerifier`, `SumVerifier`, `MonotonicVerifier<T>` |
-| SQL agents | `SQLTokenizer` + `SQLSafetyVerifier` (statement allow-list, WHERE-required on UPDATE/DELETE) |
+| SQL agents | `SQLTokenizer` + `SQLSafetyVerifier` (statement allow-list keyed on the most-privileged top-level verb — `WITH ... DELETE` and `EXPLAIN ANALYZE DELETE` classify as DELETE — WHERE-required on UPDATE/DELETE) |
 | Markdown | `MarkdownStructureVerifier` (fences, links, headings) |
 | Content policy | `ProhibitedTermsVerifier`, `RequiredTermsVerifier`, `ImplicationVerifier<T>` (cross-field), `UniqueElementsVerifier<T>` |
 | Language | `LanguageVerifier` (NLLanguageRecognizer) |
@@ -200,7 +202,11 @@ Verifiers compose with `Verifier.contramap`, so a `Verifier<String>` is reusable
 
 ### Control loop
 
-`ControlLoop` runs propose-and-check until pass / reject / escalate / budget exhausted. `StreamingControlLoop` does the same but yields `ProgressEvent`s while running. Both respect `Task.cancel()`. `Budget` covers turns, tool calls, repair attempts, wall-clock, and output tokens.
+`ControlLoop` runs propose-and-check until pass / reject / escalate / budget exhausted. `StreamingControlLoop` does the same but yields `ProgressEvent`s while running. Both respect `Task.cancel()`. `Budget` covers turns, tool calls, repair attempts, wall-clock, output tokens, and streaming stall caps (`firstToken`, `interChunkGap`); every cap is the number of allowed occurrences, and in-flight model calls are wall-clock bounded, so a hung model surfaces as `budgetExhausted` instead of blocking forever.
+
+Repair prompts are self-contained by default (`RepairPromptBuilder`): the original task, the byte-capped failed output, and every diagnostic travel with the repair turn, so stateless transports can actually repair (`.diagnosticOnly` restores the minimal prompt for stateful ones). Transient model failures (rate limiting, connectivity, model still downloading) are retried per a configurable `retryPolicy`; guardrail violations and refusals surface immediately as typed `CompoundError` cases.
+
+Typed structured output runs through the same loop: `ControlLoop.run(..., extract:verifiers:)` and `CompoundSession.respond(to:generating:)` produce a `TypedRunOutcome<T>` gated by a typed `VerifierChain<T>`, in two-phase `.reasonThenExtract` (free-form reasoning with tools, then constrained extraction) or single-phase `.direct` mode.
 
 ### Observability and governance
 
@@ -215,7 +221,12 @@ Verifiers compose with `Verifier.contramap`, so a `Verifier<String>` is reusable
 
 ### Recent hardening
 
-- SSRF gating in `WebFetchTool`: every A/AAAA record from a `HostResolver` (default `SystemHostResolver`) is checked against the URL block list before the request is issued, and `URLSession.bytes(for:)` enforces the byte cap mid-stream.
+- SSRF gating in `WebFetchTool`: every A/AAAA record from a `HostResolver` (default `SystemHostResolver`) is checked against the URL block list before the request is issued, every HTTP redirect hop is re-gated against the full policy with a hop cap (default 5), and `URLSession.bytes(for:)` enforces the byte cap mid-stream.
+- Typed error taxonomy: FoundationModels session failures map to `CompoundError` cases (`guardrailViolation`, `contextWindowExceeded(promptTokens:)`, `refusal`, `unsupportedLanguage`, `modelRateLimited`) at the `ModelClient` boundary instead of an opaque `.underlying` wrapper.
+- Internal verifier errors fail closed: `SecretsVerifier` compiles its default rules eagerly (no silent drops) and `JSONSchemaVerifier` rejects an uncompilable `pattern` instead of treating it as no-constraint; `PatternRedactor` replaces oversized inputs rather than passing them through unscanned.
+- Deadline enforcement: `withDeadline` bounds in-flight model calls at the budget's remaining wall clock, and streaming runs race a stall watchdog (`firstToken` / `interChunkGap`) that can salvage verified partial output.
+- Token accounting: `SessionTokenLedger` tracks context occupancy per turn; `ModelClient` proactively compacts its session past a configurable high watermark, and `CompoundSession.respond` recovers from context overflow with one token-budgeted re-assembly.
+- `DefaultProcessRunner` drains stdout/stderr concurrently (no more >64 KB pipe deadlock), caps captured output with a truncation marker, and escalates SIGTERM → SIGKILL on timeout or cancellation.
 - IP canonicalization across `URLSafetyVerifier` uses `inet_pton` so octal, hex, decimal-integer, IPv4-mapped IPv6, CGNAT, NAT64, Teredo, ULA, and link-local addresses all resolve to the same blocked space; non-ASCII hosts (IDN homographs) are rejected.
 - `RedactingTracer` scrubs reject reasons, diagnostics, and tool names before they reach the inner tracer; pair it with `JSONLTracer` so persisted traces never carry raw secrets.
 - `ModelResponding` and `ModelStreaming` protocols extract the non-streaming and streaming halves of `ModelClient` so tests can inject fakes against `ControlLoop` and `StreamingControlLoop` without a live `LanguageModelSession`.
@@ -228,7 +239,7 @@ Verifiers compose with `Verifier.contramap`, so a `Verifier<String>` is reusable
 | Concern | Type |
 |---|---|
 | Versioned prompts | `PromptTemplate`, `PromptRegistry` |
-| Evaluation | `EvalCase`, `EvalSuite`, `EvalRunner`, `EvalReport`, `EvalPredicate` (Contains / DoesNotContain / MatchesRegex / Verifier / Closure) |
+| Evaluation | `EvalCase`, `EvalSuite`, `EvalRunner`, `EvalReport` (Codable, with environment snapshot), `EvalGate` (pass-rate + baseline regression gate), `EvalPredicate` (Contains / DoesNotContain / MatchesRegex / Verifier / Closure) |
 | Transient-error retry | `Retry.with`, `RetryPolicy` (exponential backoff + jitter), `RetryClassifier` |
 | Conversation history | `ConversationMessage`, `InMemoryConversationStore`, `JSONLConversationStore` |
 | Document chunking | `DocumentChunker.slidingWindow`, `DocumentChunker.paragraphs` |
@@ -251,7 +262,7 @@ Compound leans on Apple's on-device frameworks all the way through. Nothing leav
 ```
 Sources/Compound/
   Compound.swift              umbrella
-  Core/                       Budget · RunContext · Errors · Progress · Retry
+  Core/                       Budget · RunContext · Errors · Progress · Retry · Deadline
   Conversation/               Message · ConversationStore · ConversationContextAssembler
   Context/                    ContextAssembler · Redactor · DocumentChunker · BM25/Dense/Hybrid retrievers · Reranker · TokenBudgetedAssembler
   Model/                      ModelClient · ModelResponding · ModelStreaming · ModelStreamResult
@@ -261,7 +272,7 @@ Sources/Compound/
   Observability/              Tracer · TraceEvent · TraceEventVisitor · RedactingTracer · SignpostTracer · MetricsCollectingTracer
   Governance/                 Policy · AuthContext · ScopeRequirement
   Prompts/                    PromptTemplate · PromptRegistry
-  Eval/                       EvalCase · EvalPredicate · EvalRunner · EvalReport
+  Eval/                       EvalCase · EvalPredicate · EvalRunner · EvalReport · EvalGate
   Intents/                    AppIntents bridge (Siri / Shortcuts / Spotlight)
   Background/                 BGTaskScheduler / NSBackgroundActivityScheduler wrappers
 Examples/                     Runnable patterns (excluded from main build; require full Xcode)

@@ -83,7 +83,7 @@ struct RAGBot {
                 ]
             ),
         ])
-        let report = await EvalRunner().run(suite, against: session)
+        let report = try await EvalRunner().run(suite, against: session)
         print(report.detailedReport())
     }
 }
