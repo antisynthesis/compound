@@ -14,6 +14,7 @@ Compound implements that pattern as a Swift package targeting Apple platforms. T
 
 - <doc:GettingStarted>
 - <doc:Architecture>
+- <doc:MemoryModel>
 - <doc:SecurityModel>
 - <doc:ObservabilityModel>
 
@@ -157,6 +158,94 @@ Compound implements that pattern as a Swift package targeting Apple platforms. T
 - ``ConversationSummarizer``
 - ``TruncatingSummarizer``
 
+### Memory
+
+Two-tier conversation memory. The read path makes no model calls; the
+write path runs off the critical path. See <doc:MemoryModel>.
+
+- <doc:MemoryModel>
+
+**Tier 1 — facts**
+
+- ``Fact``
+- ``FactID``
+- ``FactSlot``
+- ``FactProvenance``
+- ``MemoryOrigin``
+- ``MemoryText``
+- ``MemoryTurn``
+- ``MemoryError``
+- ``MemoryStore``
+- ``InMemoryFactStore``
+- ``FileFactStore``
+- ``MemoryQuery``
+- ``MemoryOrder``
+- ``PurgePredicate``
+- ``InvalidationReason``
+- ``ScoredFact``
+- ``SalienceScorer``
+- ``SalienceComponents``
+
+**Tier 2 — archive**
+
+- ``ArchivedRound``
+- ``RoundBuilder``
+- ``ArchivalStore``
+- ``IndexedArchivalStore``
+- ``ArchivalHit``
+- ``ArchivalRetriever``
+- ``ArchivalJournal``
+- ``ArchivalSnapshot``
+- ``InMemoryArchivalJournal``
+- ``FileArchivalJournal``
+- ``MutableTextIndex``
+- ``BM25Index``
+- ``DenseIndex``
+
+**Write path — extraction**
+
+- ``FactExtracting``
+- ``FactCandidate``
+- ``FactSpan``
+- ``ExtractionContext``
+- ``ExtractionRule``
+- ``DeterministicFactExtractor``
+- ``ModelFactExtractor``
+- ``FactSpanSelection``
+
+**Write path — reconciliation and forgetting**
+
+- ``FactReconciling``
+- ``DeterministicReconciler``
+- ``MemoryOperation``
+- ``MemoryRationale``
+- ``MemoryDecision``
+- ``Reconciliation``
+- ``ReconciliationOutcome``
+- ``ModelMutationHook``
+- ``ForgettingPolicy``
+- ``ForgettingSweep``
+- ``SweepOutcome``
+
+**Read path and session surface**
+
+- ``MemoryContextAssembler``
+- ``MemoryBudget``
+- ``CoreMemoryBlock``
+- ``MemorySessionConfiguration``
+- ``MemoryTurnObserving``
+- ``NullMemoryTurnObserver``
+
+**Lifecycle and observability**
+
+- ``MemoryConsolidator``
+- ``ConsolidationSummary``
+- ``ArchivePolicy``
+- ``MemoryMaintenance``
+- ``MemoryTrace``
+- ``MemoryModelCallMeter``
+- ``MetricsSnapshot/MemoryMetrics``
+
 ### Prompts
 
 - ``PromptTemplate``
@@ -183,6 +272,11 @@ Compound implements that pattern as a Swift package targeting Apple platforms. T
 - ``RetrievalEvalReport``
 - ``RetrievalRobustness``
 - ``RankStability``
+- ``MemoryEvalCase``
+- ``MemoryEvalSuite``
+- ``MemoryEvalRunner``
+- ``MemoryEvalReport``
+- ``MemoryEvalBlob``
 
 ### Reliability
 

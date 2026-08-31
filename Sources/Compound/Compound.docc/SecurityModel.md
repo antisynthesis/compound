@@ -30,6 +30,20 @@ IP canonicalization goes through `inet_pton` for both IPv4 and IPv6 so that octa
 
 ``RedactingTracer`` is a decorator that wraps any ``Tracer`` and runs reject reasons, diagnostic messages, and tool names through a chain of ``Redactor`` instances before they reach the inner tracer. The intended pattern is `RedactingTracer(inner: JSONLTracer(...), redactors: [...])` so persisted traces never carry raw secrets. ``OSLogTracer/PrivacyLevel`` controls whether free-form fields are marked `.private` to the unified log; the default is `.balanced`.
 
+## Memory is user data
+
+Memory persists what a user said, so it gets treated as user data on both directions of travel. See <doc:MemoryModel> for the full model.
+
+**Redaction runs on the way in, not only on the way out.** If any configured ``Redactor`` *changes* a candidate fact's text, the candidate is **rejected outright** rather than stored in redacted form. Two reasons: a redacted span is no longer a verbatim span, so the extractive write path's invariant would be void; and a fact that contains a secret should not be persisted at all. The rejection is counted and traced as `event=rejected reason=redactionFired`.
+
+**Claims are extractive, never authored.** A fact's text must be a literal substring of a message the record *names* as its evidence — a span found elsewhere in the transcript does not count, because accepting it would make the provenance pointer decorative. This is the highest-value guard available for a small on-device writer: syntactic validity is not evidence of correctness, so an extractive-only write path eliminates hallucinated memories at essentially zero cost. The same rule binds the optional model hooks, which can only select among pre-computed spans or pick an index into a supplied list — never supply text, never name an id they were not given.
+
+**Recalled memory is as inert as a retrieved document.** Facts and archived rounds enter assembly as `RetrievedSource`s, pass through the same single `.retrievedSources` redaction pass, and are fenced by the same ``PromptFrame``. Fence-shaped text inside a stored fact is escaped, not parsed. There is deliberately no `.memory` bit on ``RedactionScope``: memory is already covered by `.retrievedSources`, and adding a bit would change what `.all` means for every existing caller while buying nothing.
+
+**Provenance is defense in depth, not a mitigation.** Every record carries a ``MemoryOrigin`` trust rank, and non-user-stated origins must clear a higher confidence bar to be admitted. Be precise about what that is worth: reported memory-poisoning success rates run 34–67%, and the most vulnerable configuration was the one that auto-injects memory into the prompt. Provenance binding aids debuggability and raises the cost of a poisoning write; it is **not** a validated defense and is not a reason to relax any other control.
+
+**Destructive deletion is a separate path.** Invalidation (bi-temporal, recoverable) and purge (destructive, compliance-shaped) never share code. ``PurgePredicate`` matches on exact normalized subject only — no substring, no prefix, no similarity — because substring matching is precisely the prefix-collision failure mode, and semantic similarity is the wrong primitive for a deletion someone is legally entitled to. Consolidation and the forgetting sweep can never reach the purge path; a spy store asserts that in the test suite.
+
 ## Sanitized child process environment
 
 ``DefaultProcessRunner`` builds child processes with a sanitized environment by default: only `PATH`, `HOME`, `TMPDIR`, `LANG`, and `LC_ALL` are propagated. To inherit the parent's environment (for `swift build` against a developer toolchain, for example) pass `inheritEnvironment: true` at construction.

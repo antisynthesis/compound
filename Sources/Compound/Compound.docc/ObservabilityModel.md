@@ -87,7 +87,24 @@ Because these are intervals rather than points, Instruments traces recorded agai
 
 ## MetricsCollectingTracer
 
-``MetricsCollectingTracer`` aggregates a ``MetricsSnapshot`` that holds run counts, model invocation latency, per-tool counters, per-verifier counters, repair scheduling counts, and budget exhaustion breakdowns. Model latency is backed by ``LatencyStats``, which keeps a sorted sample for O(log n) percentile reads. Call `current()` from the actor to read a consistent snapshot.
+``MetricsCollectingTracer`` aggregates a ``MetricsSnapshot`` that holds run counts, model invocation latency, per-tool counters, per-verifier counters, repair scheduling counts, budget exhaustion breakdowns, and — via ``MetricsSnapshot/MemoryMetrics`` — memory write-path cost (consolidations, facts added/updated/deleted, rounds archived, model calls, consolidation latency). Model latency is backed by ``LatencyStats``, which keeps a sorted sample for O(log n) percentile reads. Call `current()` from the actor to read a consistent snapshot.
+
+## Memory events
+
+The memory layer adds exactly **one** ``TraceEvent`` case: ``TraceEvent/memoryConsolidated(runID:extracted:added:updated:deleted:archived:modelCalls:elapsed:)``, label `memory.consolidated`. It carries the per-pass write-path cost — candidates extracted, facts added/updated/deleted, rounds archived, model calls actually issued, and wall clock.
+
+One case, and no more, is a deliberate budget. Each case costs an enum case, two switch arms, a visitor method, a default, an accept arm, three ``OSLogTracer`` privacy switches, and a pair of coding keys. This one earns it because write-path cost is the memory field's measurement blind spot, and on-device it is the number that decides shippability — those are structured integers that free-form strings cannot aggregate. `modelCalls` is reported even in the fully deterministic configuration where it is always zero, because "this configuration issues no model calls" is a claim that should be visible in the data rather than asserted in a doc comment.
+
+Everything else memory does — recall, purge, decay, eviction, candidate rejection, queue overflow — uses ``TraceEvent/info(runID:category:message:)`` under the grammar documented on ``MemoryTrace``:
+
+- category is always `memory`;
+- the message is a space-joined list of `key=value` pairs;
+- the first pair is always `event=<name>`;
+- values never contain a space.
+
+That last rule is enforced by ``MemoryTrace/value(_:)`` at the single choke point rather than trusted at each call site, because some values are host-supplied — a thread id comes from `RunContext.metadata` and is whatever the application put there. Unsanitized, a value containing a space would split into bogus pairs and one containing a newline could forge an entire log line.
+
+Error values are reported by **type name, never message**. An error thrown by the memory write path can quote the very content a guard just refused to store, and a diagnostic line is not the place to leak it.
 
 ## Forward compatibility with TraceEventVisitor
 

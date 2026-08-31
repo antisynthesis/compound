@@ -73,6 +73,7 @@ flowchart TD
     subgraph CTX ["🧩 Context Assembly"]
         direction LR
         RET["Retrievers<br/>BM25 · Dense · Hybrid · RRF<br/>rerank · iterative loop"]
+        MEM["Memory (optional)<br/>facts · archive · core block<br/>zero model calls"]
         RED["Redactors"]
         GATE["Policy gates"]
         BUD["Token budget"]
@@ -141,7 +142,40 @@ flowchart TD
 
 ### Context assembly
 
-`DefaultContextAssembler` and `ConversationContextAssembler` compose instructions, retrieved sources, prior turns, redactors, and policy gates. Redactors scan retrieved sources and stored history as well as the user prompt by default (`RedactionScope.all`), and rendered prompts fence untrusted content in `<source>` / `<message>` blocks with escaping, so injected citation lines and forged `User:` turns stay inert. `TokenBudgetedAssembler` wraps any assembler to fit a soft token budget.
+`DefaultContextAssembler` and `ConversationContextAssembler` compose instructions, retrieved sources, prior turns, redactors, and policy gates. Redactors scan retrieved sources and stored history as well as the user prompt by default (`RedactionScope.all`), and rendered prompts fence untrusted content in `<source>` / `<message>` blocks with escaping, so injected citation lines and forged `User:` turns stay inert. `TokenBudgetedAssembler` wraps any assembler to fit a soft token budget. `MemoryContextAssembler` adds the memory tiers (below).
+
+### Memory
+
+Two-tier conversation memory, optional and off by default. The read path makes **zero model calls**; the write path runs off the critical path.
+
+The framing is deliberately modest. Full context beats structured memory when you can afford it — on Mem0's own LOCOMO table full context scored 72.90 against Mem0's 66.88. Compound targets a **4096-token on-device window** where a full LOCOMO conversation (9k–16k tokens) does not fit, so there is no full-context alternative to lose to. The claim is the part that actually breaks in production: a testable **forgetting control plane** — supersession, decay, amnesia, purge, drift.
+
+- **Tier 1 — facts.** `Fact` is a small bi-temporal record (`validFrom` / `validUntil` for world time, `recordedAt` / `invalidatedAt` for transaction time), with verbatim-span text, provenance back to message ids, trust origin, confidence, and TTL. Separating the two clocks is what makes "what did I believe in March?" answerable; a correction inserts a new record and sets the old one's `validUntil` to the new one's `validFrom` rather than mutating history. `MemoryStore` (`InMemoryFactStore`, durable `FileFactStore`) is **embedding-free** — similarity is weighted Jaccard over `BM25Retriever.defaultTokenize` — so the control plane is testable off-device and does not depend on embedding quality.
+- **Tier 2 — archive.** Aged-out transcript is chunked at round granularity by `RoundBuilder` and indexed into the **existing** BM25 and dense retrievers; there is no third index. `IndexedArchivalStore` indexes an expanded key line but *serves* the verbatim round, so key expansion lands with zero edits to `DocumentChunk` or either retriever. `ArchivalRetriever` is a plain `Retriever`.
+- **Deletion fans out to every index**, collecting per-index failures rather than short-circuiting, with a durable retry queue. Lexical and vector deletion are complementary, not redundant, so a purge reaching only one index leaves the content retrievable through the other. Recoverable invalidation and destructive purge are separate code paths, and `PurgePredicate` is **exact-match only** — no similarity, no prefix — because substring matching *is* the prefix-collision failure mode.
+- **Deterministic core, two optional model hooks.** Recall, ranking, id derivation, reconciliation, forgetting, purge, and the whole eval are deterministic. `ModelFactExtractor` may only *narrow* a set of pre-computed spans and re-rate importance; `ModelMutationHook` may only pick an operation plus an index into a bounded list. Neither can author text or name an id it was not given. Both carry `ModelReranker`'s contract: deadline, `maxModelCalls`, validation before admission, and cancellation rethrown rather than swallowed as a fallback.
+- **Memory is user data.** Redaction runs on the way **in** as well as out — a candidate any redactor *changes* is rejected outright rather than stored redacted, because a redacted span is no longer a verbatim span. Recalled facts reach the model as `RetrievedSource`s through one redaction pass and the standard `PromptFrame` fencing, so a remembered fact is exactly as inert as a retrieved document. Provenance binding and the higher bar on non-user-stated origins are defense in depth and debuggability, **not a validated mitigation**.
+- **Budget.** ~448 tokens of 4096 (96 core / 160 facts / 192 archival), far below Zep's ~1.6k or Mem0's ~7k, either of which would starve the actual task at this window size. The core block is pinned evict-last; facts carry normalized salience so the least salient goes first; and the assembler trims its own transcript, closing a hazard `TokenBudgetedAssembler` cannot (it evicts sources but never transcript).
+
+`CompoundSession.Configuration.memory` defaults to `nil`, and `nil` preserves prior behavior exactly. Consolidation runs from `MemoryMaintenance`'s background activity — there is no hidden pump task — so the freshness gap is an accepted, documented property. The full model, including the forgetting policy and the eval suite's gate rationale, is in the `MemoryModel` DocC article (`Sources/Compound/Compound.docc/MemoryModel.md`).
+
+```swift
+let facts = InMemoryFactStore()
+let conversation = InMemoryConversationStore()
+let consolidator = MemoryConsolidator(memory: facts, conversation: conversation)
+
+let session = CompoundSession(.init(
+    assembler: MemoryContextAssembler(
+        baseInstructions: "You are a helpful on-device assistant.",
+        conversation: conversation,
+        memory: facts
+    ),
+    memory: MemorySessionConfiguration(
+        conversation: conversation,
+        observer: consolidator
+    )
+))
+```
 
 Retrieval kit:
 
@@ -285,6 +319,10 @@ Regeneration refuses to write when any case fails — a red baseline would gate 
 
 Retrieval gets its own evals. `RetrievalMetrics` computes recall@k, precision@k, graded nDCG@k, and reciprocal rank, each returning `nil` when the metric is *undefined* for a query rather than a misleading zero — an abstention case has no relevant set, and scoring it `0.0` would make a suite look worse the more correctly-abstaining cases you add. `RetrievalEvalRunner` scores any `Retriever` against graded ground truth keyed by deterministic chunk ids; a retriever that throws fails only its own case and is excluded from the aggregate means, so a broken index cannot be mistaken for a merely bad one. `RetrievalRobustness` adds near-duplicate distractor generation, rank stability (overlap, top-rank retention, max displacement, Kendall's tau), and abstention summarization.
 
+Memory gets its own suite too, with **no LLM judge anywhere**: a case passes iff every `mustContain` term is present in the normalized top-k blob and no `mustNotContain` term is — a pure set predicate, reproducible across model versions, which is what a committed baseline requires. Fourteen cases span supersession, drift, decay, amnesia, purge, prefix collision, cross-lingual obfuscation, fact recall across turns, and contradiction updates. Every report carries `Provenance` (embedder, extractor, reconciler, prompt version, model availability) and `WritePathCost`, because an embedder swap alone has been shown to reverse a published memory result — a baseline that does not record its confounds silently invalidates itself. Reports also carry a **memory-off control delta**, so the gate never blesses a component that fails to beat plain retrieval.
+
+The memory gate is `EvalGate(passRateThreshold: 0.75, tolerance: 0.0)` rather than the golden gate's `1.0 / 0.0`. The threshold sits below 1.0 because the suite **deliberately includes adversarial families deterministic systems are known to fail** (identifier obfuscation, cross-lingual aliases), and the committed baseline records one such failure today — including them keeps the known weakness visible in the baseline rather than absent from it. The 0.0 tolerance is what stops those documented gaps from widening silently. Regenerate with `REGENERATE_MEMORY_BASELINE=1 swift test --filter MemoryGoldenGate`.
+
 ### Hardening
 
 - Retrieval indexes are correct under mutation: `index` is an upsert that retracts the superseded posting's contribution, `remove` restores document-frequency and average-length statistics to a never-indexed state, and a re-indexed chunk whose content embeds to a zero-norm vector is removed rather than left stale.
@@ -336,6 +374,7 @@ Sources/Compound/
   Compound.swift              umbrella
   Core/                       Budget · RunContext · Errors · Progress · Retry · Deadline
   Conversation/               Message · ConversationStore · ConversationContextAssembler
+  Memory/                     Fact · MemoryStore · SalienceScorer · RoundBuilder · IndexedArchivalStore · FactExtracting · DeterministicReconciler · ForgettingPolicy · MemoryContextAssembler · MemoryConsolidator · MemoryMaintenance
   Context/                    ContextAssembler · Redactor · DocumentChunker · BM25/Dense/Hybrid retrievers · Reranker · TokenBudgetedAssembler · IterativeRetrievalAssembler · QuerySufficiency
   Model/                      ModelClient · ModelResponding · ModelStreaming · ModelStreamResult
   Tools/                      VerifiedTool · ToolRegistry · Builtins (Calculator · KVStore · Search · WebFetch)
@@ -344,10 +383,11 @@ Sources/Compound/
   Observability/              Tracer · TraceEvent · TraceCoding · TraceReader · TraceEventVisitor · RedactingTracer · SignpostTracer · MetricsCollectingTracer
   Governance/                 Policy · AuthContext · ScopeRequirement
   Prompts/                    PromptTemplate · PromptRegistry
-  Eval/                       EvalCase · EvalPredicate · EvalRunner · EvalReport · EvalGate · RetrievalMetrics · RetrievalEvalCase · RetrievalRobustness
+  Eval/                       EvalCase · EvalPredicate · EvalRunner · EvalReport · EvalGate · RetrievalMetrics · RetrievalEvalCase · RetrievalRobustness · MemoryEvalCase · MemoryEvalRunner · MemoryEvalReport
   Intents/                    AppIntents bridge (Siri / Shortcuts / Spotlight)
   Background/                 BGTaskScheduler / NSBackgroundActivityScheduler wrappers
 Evals/baseline.json           Committed golden-eval baseline (outside every target directory)
+Evals/memory-baseline.json    Committed memory-eval baseline (gated at 0.75 / tolerance 0.0)
 Examples/                     Runnable patterns (excluded from main build; type-checked in CI)
 Tests/CompoundTests/          Swift Testing suite (Golden/ holds the golden eval suite)
 ```

@@ -23,7 +23,10 @@ Compound types:
 - ``ConversationContextAssembler`` — adds prior message history with optional summarization
 - ``TokenBudgetedAssembler`` — wraps any assembler to drop low-score sources until a soft token budget fits
 - ``Retriever`` — protocol (``BM25Retriever``, ``DenseRetriever``, ``HybridRetriever``)
+- ``MemoryContextAssembler`` — adds the two memory tiers (structured ``Fact`` records and archived transcript rounds) plus a pinned core block, with zero model calls on the read path; see <doc:MemoryModel>
 - ``Redactor`` — pattern-based input redaction
+
+Memory enters through this layer rather than beside it. Recalled facts and archived rounds become `RetrievedSource`s, pass through the same single redaction pass as documents, and are fenced by the same ``PromptFrame`` — so a remembered fact is exactly as inert as a retrieved one, and there is no second redaction seam to forget.
 
 ## 2. Stochastic core
 
