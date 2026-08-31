@@ -25,10 +25,12 @@ public struct NullTracer: Tracer {
 }
 
 /// Bounded in-memory tracer. Stores up to ``capacity`` events in FIFO
-/// order; oldest events are dropped once the cap is exceeded.
+/// order; oldest events are dropped once the cap is exceeded. Every event
+/// is stamped at emission, so ``records`` is a timeline and not just a
+/// bag of events.
 public actor InMemoryTracer: Tracer {
-    /// Events captured so far.
-    private(set) public var events: [TraceEvent] = []
+    /// Stamped events captured so far, oldest first.
+    private(set) public var records: [TraceRecord] = []
     /// Maximum number of events retained before FIFO eviction kicks in.
     public let capacity: Int
 
@@ -37,11 +39,14 @@ public actor InMemoryTracer: Tracer {
         self.capacity = capacity
     }
 
-    /// Appends `event` and trims excess from the front.
+    /// Events captured so far, timestamps stripped.
+    public var events: [TraceEvent] { records.map(\.event) }
+
+    /// Stamps and appends `event`, trimming excess from the front.
     public func record(_ event: TraceEvent) {
-        events.append(event)
-        if events.count > capacity {
-            events.removeFirst(events.count - capacity)
+        records.append(TraceRecord(event: event))
+        if records.count > capacity {
+            records.removeFirst(records.count - capacity)
         }
     }
 
@@ -50,14 +55,24 @@ public actor InMemoryTracer: Tracer {
         events
     }
 
+    /// Returns a copy of the recorded events with their timestamps.
+    public func recordSnapshot() -> [TraceRecord] {
+        records
+    }
+
     /// Discards all recorded events while keeping capacity.
     public func clear() {
-        events.removeAll(keepingCapacity: true)
+        records.removeAll(keepingCapacity: true)
     }
 
     /// Returns the events scoped to a single `runID`.
     public func events(for runID: UUID) -> [TraceEvent] {
-        events.filter { $0.runID == runID }
+        records.filter { $0.runID == runID }.map(\.event)
+    }
+
+    /// Returns the stamped records scoped to a single `runID`.
+    public func records(for runID: UUID) -> [TraceRecord] {
+        records.filter { $0.runID == runID }
     }
 }
 
@@ -147,6 +162,18 @@ public struct OSLogTracer: Tracer {
             logger.notice("tool.output.rejected run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public) why=\(diag.summary, privacy: .public)")
         case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
             logger.debug("verifier.evaluated run=\(id.uuidString, privacy: .public) v=\(v, privacy: .public) cost=\(cost.rawValue, privacy: .public) verdict=\(Self.label(verdict), privacy: .public) ms=\(Self.ms(elapsed), privacy: .public)")
+        case .bestOfNSampled(let id, let candidates, _, let agreement, let selectedIndex):
+            logger.info("sampling.best_of_n run=\(id.uuidString, privacy: .public) n=\(candidates, privacy: .public) selected=\(selectedIndex, privacy: .public) agreement=\(Self.ratio(agreement), privacy: .public)")
+        case .breakerTransitioned(let id, let signal, let from, let to, let failures):
+            logger.notice("health.breaker run=\(id.uuidString, privacy: .public) signal=\(signal.rawValue, privacy: .public) from=\(from.rawValue, privacy: .public) to=\(to.rawValue, privacy: .public) failures=\(failures, privacy: .public)")
+        case .degradationApplied(let id, let mode, let reason):
+            logger.notice("health.degraded run=\(id.uuidString, privacy: .public) mode=\(mode.rawValue, privacy: .public) why=\(reason, privacy: .public)")
+        case .routingEscalated(let id, let step, let confidence, let attempt):
+            logger.info("routing.escalated run=\(id.uuidString, privacy: .public) step=\(step, privacy: .public) attempt=\(attempt, privacy: .public) confidence=\(Self.ratio(confidence), privacy: .public)")
+        case .retrievalRound(let id, let round, let query, let retrieved, let new, let verdict):
+            logger.debug("retrieval.round run=\(id.uuidString, privacy: .public) round=\(round, privacy: .public) retrieved=\(retrieved, privacy: .public) new=\(new, privacy: .public) verdict=\(verdict, privacy: .public) query=\(query, privacy: .public)")
+        case .retrievalLoopEnded(let id, let rounds, let sources, let reason):
+            logger.info("retrieval.loop_ended run=\(id.uuidString, privacy: .public) rounds=\(rounds, privacy: .public) sources=\(sources, privacy: .public) reason=\(reason, privacy: .public)")
         case .repairScheduled(let id, let attempt, let diag):
             logger.info("repair.scheduled run=\(id.uuidString, privacy: .public) attempt=\(attempt, privacy: .public) why=\(diag.summary, privacy: .public)")
         case .budgetExhausted(let id, let kind):
@@ -207,6 +234,18 @@ public struct OSLogTracer: Tracer {
             }
         case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
             logger.debug("verifier.evaluated run=\(id.uuidString, privacy: .public) v=\(v, privacy: .public) cost=\(cost.rawValue, privacy: .public) verdict=\(Self.label(verdict), privacy: .public) ms=\(Self.ms(elapsed), privacy: .public)")
+        case .bestOfNSampled(let id, let candidates, _, let agreement, let selectedIndex):
+            logger.info("sampling.best_of_n run=\(id.uuidString, privacy: .public) n=\(candidates, privacy: .public) selected=\(selectedIndex, privacy: .public) agreement=\(Self.ratio(agreement), privacy: .public)")
+        case .breakerTransitioned(let id, let signal, let from, let to, let failures):
+            logger.notice("health.breaker run=\(id.uuidString, privacy: .public) signal=\(signal.rawValue, privacy: .public) from=\(from.rawValue, privacy: .public) to=\(to.rawValue, privacy: .public) failures=\(failures, privacy: .public)")
+        case .degradationApplied(let id, let mode, let reason):
+            logger.notice("health.degraded run=\(id.uuidString, privacy: .public) mode=\(mode.rawValue, privacy: .public) why=\(reason, privacy: .private)")
+        case .routingEscalated(let id, let step, let confidence, let attempt):
+            logger.info("routing.escalated run=\(id.uuidString, privacy: .public) step=\(step, privacy: .private) attempt=\(attempt, privacy: .public) confidence=\(Self.ratio(confidence), privacy: .public)")
+        case .retrievalRound(let id, let round, let query, let retrieved, let new, let verdict):
+            logger.debug("retrieval.round run=\(id.uuidString, privacy: .public) round=\(round, privacy: .public) retrieved=\(retrieved, privacy: .public) new=\(new, privacy: .public) verdict=\(verdict, privacy: .public) query=\(query, privacy: .private)")
+        case .retrievalLoopEnded(let id, let rounds, let sources, let reason):
+            logger.info("retrieval.loop_ended run=\(id.uuidString, privacy: .public) rounds=\(rounds, privacy: .public) sources=\(sources, privacy: .public) reason=\(reason, privacy: .public)")
         case .repairScheduled(let id, let attempt, let diag):
             logger.info("repair.scheduled run=\(id.uuidString, privacy: .public) attempt=\(attempt, privacy: .public) why=\(diag.summary, privacy: .private)")
         case .budgetExhausted(let id, let kind):
@@ -245,6 +284,18 @@ public struct OSLogTracer: Tracer {
             logger.notice("tool.output.rejected run=\(id.uuidString, privacy: .private) tool=\(tool, privacy: .private) why=\(diag.summary, privacy: .private)")
         case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
             logger.debug("verifier.evaluated run=\(id.uuidString, privacy: .private) v=\(v, privacy: .private) cost=\(cost.rawValue, privacy: .private) verdict=\(Self.label(verdict), privacy: .private) ms=\(Self.ms(elapsed), privacy: .private)")
+        case .bestOfNSampled(let id, let candidates, _, let agreement, let selectedIndex):
+            logger.info("sampling.best_of_n run=\(id.uuidString, privacy: .private) n=\(candidates, privacy: .private) selected=\(selectedIndex, privacy: .private) agreement=\(Self.ratio(agreement), privacy: .private)")
+        case .breakerTransitioned(let id, let signal, let from, let to, let failures):
+            logger.notice("health.breaker run=\(id.uuidString, privacy: .private) signal=\(signal.rawValue, privacy: .private) from=\(from.rawValue, privacy: .private) to=\(to.rawValue, privacy: .private) failures=\(failures, privacy: .private)")
+        case .degradationApplied(let id, let mode, let reason):
+            logger.notice("health.degraded run=\(id.uuidString, privacy: .private) mode=\(mode.rawValue, privacy: .private) why=\(reason, privacy: .private)")
+        case .routingEscalated(let id, let step, let confidence, let attempt):
+            logger.info("routing.escalated run=\(id.uuidString, privacy: .private) step=\(step, privacy: .private) attempt=\(attempt, privacy: .private) confidence=\(Self.ratio(confidence), privacy: .private)")
+        case .retrievalRound(let id, let round, let query, let retrieved, let new, let verdict):
+            logger.debug("retrieval.round run=\(id.uuidString, privacy: .private) round=\(round, privacy: .private) retrieved=\(retrieved, privacy: .private) new=\(new, privacy: .private) verdict=\(verdict, privacy: .private) query=\(query, privacy: .private)")
+        case .retrievalLoopEnded(let id, let rounds, let sources, let reason):
+            logger.info("retrieval.loop_ended run=\(id.uuidString, privacy: .private) rounds=\(rounds, privacy: .private) sources=\(sources, privacy: .private) reason=\(reason, privacy: .private)")
         case .repairScheduled(let id, let attempt, let diag):
             logger.info("repair.scheduled run=\(id.uuidString, privacy: .private) attempt=\(attempt, privacy: .private) why=\(diag.summary, privacy: .private)")
         case .budgetExhausted(let id, let kind):
@@ -256,6 +307,12 @@ public struct OSLogTracer: Tracer {
         case .unknown(let id, let label, let payload):
             logger.info("trace.unknown run=\(id.uuidString, privacy: .private) label=\(label, privacy: .private) keys=\(payload.keys.sorted().joined(separator: ","), privacy: .private)")
         }
+    }
+
+    /// Renders an optional ratio for a log line; `nil` (an undefined
+    /// signal) is spelled out rather than fabricated as a number.
+    private static func ratio(_ value: Double?) -> String {
+        value.map { String(format: "%.3f", $0) } ?? "n/a"
     }
 
     private static func ms(_ d: Duration) -> Int {
@@ -273,14 +330,30 @@ public struct OSLogTracer: Tracer {
     }
 }
 
-/// Appends one JSON object per event to a file. Errors during write are
-/// logged at `.error` via `os.Logger` and otherwise swallowed (the
-/// ``Tracer`` protocol is non-throwing). A configurable ``FlushPolicy``
-/// controls when the underlying file handle is synchronized to disk.
+/// Appends one JSON object per ``TraceRecord`` to a file — the full
+/// event, losslessly, plus the wall-clock instant it was recorded — so
+/// the file reads back through ``TraceReader`` into the same values that
+/// went in. Errors during write are logged at `.error` via `os.Logger`
+/// and otherwise swallowed (the ``Tracer`` protocol is non-throwing). A
+/// configurable ``FlushPolicy`` controls when the underlying file handle
+/// is synchronized to disk.
+///
+/// The file is size-bounded: once a write would push the current file
+/// past ``maxFileBytes`` it is rotated to `<file>.1` (shifting older
+/// generations up and discarding the oldest beyond ``maxFiles``), so a
+/// long-lived on-device trace occupies at most `maxFileBytes * maxFiles`.
 ///
 /// Single-writer requirement: this type owns the file handle for its
 /// lifetime. Pointing two instances at the same URL interleaves writes
-/// unpredictably — use one tracer per file.
+/// and rotations unpredictably — use one tracer per file.
+///
+/// # Example
+/// ```swift
+/// let tracer = try JSONLTracer(fileURL: url, flushPolicy: .everyN(16))
+/// await tracer.record(.info(runID: id, category: "app", message: "ready"))
+/// try await tracer.close()
+/// let batch = try TraceReader.readRotated(baseURL: url)
+/// ```
 public actor JSONLTracer: Tracer {
     /// When the file handle is synchronized to disk.
     public enum FlushPolicy: Sendable, Equatable {
@@ -292,44 +365,91 @@ public actor JSONLTracer: Tracer {
         case everyN(Int)
     }
 
+    /// Default rotation threshold: 8 MiB per file.
+    public static let defaultMaxFileBytes = 8 * 1024 * 1024
+    /// Default number of retained generations, current file included.
+    public static let defaultMaxFiles = 4
+
     private let url: URL
-    private let handle: FileHandle
-    private let encoder = JSONEncoder()
+    private var handle: FileHandle?
+    private let encoder: JSONEncoder
     private let flushPolicy: FlushPolicy
     private let logger = Logger(subsystem: "com.antisynthesis.compound", category: "jsonltracer")
     private var writesSinceFlush: Int = 0
+    private var bytesWritten: Int = 0
+
+    /// Rotation threshold in bytes for the current file.
+    public let maxFileBytes: Int
+    /// Retained generations, current file included. `1` disables archives
+    /// (the file is truncated instead).
+    public let maxFiles: Int
 
     /// Opens the file for append (creating it if missing) and seeks to
     /// the end.
     ///
+    /// - Parameters:
+    ///   - fileURL: File to append to; also the base name for rotated
+    ///     generations (`fileURL` + `.1`, `.2`, …).
+    ///   - flushPolicy: When to `fsync`.
+    ///   - maxFileBytes: Rotate once a write would exceed this size.
+    ///     Precondition-checked positive.
+    ///   - maxFiles: Generations to retain, current file included.
+    ///     Precondition-checked at least 1.
     /// - Throws: Any error from `FileHandle(forWritingTo:)`.
-    public init(fileURL: URL, flushPolicy: FlushPolicy = .never) throws {
+    public init(
+        fileURL: URL,
+        flushPolicy: FlushPolicy = .never,
+        maxFileBytes: Int = JSONLTracer.defaultMaxFileBytes,
+        maxFiles: Int = JSONLTracer.defaultMaxFiles
+    ) throws {
+        precondition(maxFileBytes > 0, "maxFileBytes must be positive")
+        precondition(maxFiles >= 1, "maxFiles must be at least 1")
         self.url = fileURL
         self.flushPolicy = flushPolicy
+        self.maxFileBytes = maxFileBytes
+        self.maxFiles = maxFiles
+        self.encoder = JSONEncoder()
+        self.encoder.outputFormatting = [.withoutEscapingSlashes]
         if !FileManager.default.fileExists(atPath: fileURL.path) {
             FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         }
-        self.handle = try FileHandle(forWritingTo: fileURL)
-        try self.handle.seekToEnd()
+        let handle = try FileHandle(forWritingTo: fileURL)
+        self.handle = handle
+        // Appending to an existing file: start the size accounting from
+        // what is already there so rotation triggers on total size.
+        self.bytesWritten = Int(try handle.seekToEnd())
     }
 
+    /// URL of a rotated generation of `base`: `base.1` is the most
+    /// recent archive, higher numbers are older.
+    public static func archiveURL(base: URL, generation: Int) -> URL {
+        URL(fileURLWithPath: base.path + ".\(generation)")
+    }
+
+    /// Stamps `event` with the current time and appends it as one JSON
+    /// line, rotating first if the line would overflow ``maxFileBytes``.
     public func record(_ event: TraceEvent) async {
-        let payload = JSONLRecord(from: event)
         let data: Data
         do {
-            data = try encoder.encode(payload)
+            data = try encoder.encode(TraceRecord(event: event))
         } catch {
             logger.error("jsonl.encode_failed label=\(event.label, privacy: .public) error=\(String(describing: error), privacy: .public)")
             return
         }
         var line = data
         line.append(0x0A)
+        rotateIfNeeded(incoming: line.count)
+        guard let handle else {
+            logger.error("jsonl.write_dropped label=\(event.label, privacy: .public) reason=closed")
+            return
+        }
         do {
             try handle.write(contentsOf: line)
         } catch {
             logger.error("jsonl.write_failed label=\(event.label, privacy: .public) error=\(String(describing: error), privacy: .public)")
             return
         }
+        bytesWritten += line.count
         writesSinceFlush += 1
         if shouldFlush() {
             try? handle.synchronize()
@@ -340,15 +460,21 @@ public actor JSONLTracer: Tracer {
     /// Forces a `fsync` of the underlying handle and resets the
     /// since-flush counter.
     public func flush() {
-        try? handle.synchronize()
+        try? handle?.synchronize()
         writesSinceFlush = 0
     }
 
-    /// Synchronizes and closes the handle. Subsequent writes will fail.
+    /// Synchronizes and closes the handle. Subsequent writes are dropped
+    /// (and logged) rather than throwing.
     public func close() throws {
+        guard let handle else { return }
         try? handle.synchronize()
+        self.handle = nil
         try handle.close()
     }
+
+    /// Current size of the active file, in bytes.
+    public var currentFileBytes: Int { bytesWritten }
 
     private func shouldFlush() -> Bool {
         switch flushPolicy {
@@ -357,69 +483,47 @@ public actor JSONLTracer: Tracer {
         case .everyN(let n): return n > 0 && writesSinceFlush >= n
         }
     }
-}
 
-private struct JSONLRecord: Encodable {
-    let label: String
-    let runID: String
-    let timestamp: Date
-    let payload: [String: String]
-
-    init(from event: TraceEvent) {
-        self.label = event.label
-        self.runID = event.runID.uuidString
-        self.timestamp = Date()
-        self.payload = JSONLRecord.payload(for: event)
-    }
-
-    static func payload(for event: TraceEvent) -> [String: String] {
-        switch event {
-        case .runStarted(_, let p, _, let auth):
-            return ["prompt_bytes": String(p.utf8.count), "auth": auth]
-        case .runEnded(_, let ok, let usage):
-            return ["ok": String(ok), "turns": String(usage.turns), "tools": String(usage.toolCalls), "repairs": String(usage.repairAttempts)]
-        case .modelInvocationStarted(_, let turn, let bytes):
-            return ["turn": String(turn), "prompt_bytes": String(bytes)]
-        case .modelInvocationCompleted(_, let turn, let bytes, let elapsed):
-            return ["turn": String(turn), "output_bytes": String(bytes), "elapsed_ms": String(JSONLRecord.ms(elapsed))]
-        case .modelInvocationFailed(_, let turn, let reason):
-            return ["turn": String(turn), "reason": reason]
-        case .toolInvocationRequested(_, let tool):
-            return ["tool": tool]
-        case .toolInvocationCompleted(_, let tool, let elapsed, let ok):
-            return ["tool": tool, "ok": String(ok), "elapsed_ms": String(JSONLRecord.ms(elapsed))]
-        case .toolPolicyDenied(_, let tool, let reason):
-            return ["tool": tool, "reason": reason]
-        case .toolArgumentRejected(_, let tool, let diag):
-            return ["tool": tool, "why": diag.summary]
-        case .toolOutputRejected(_, let tool, let diag):
-            return ["tool": tool, "why": diag.summary]
-        case .verifierEvaluated(_, let v, let cost, let verdict, let elapsed):
-            return ["verifier": v, "cost": String(cost.rawValue), "verdict": JSONLRecord.verdictLabel(verdict), "elapsed_ms": String(JSONLRecord.ms(elapsed))]
-        case .repairScheduled(_, let attempt, let diag):
-            return ["attempt": String(attempt), "why": diag.summary]
-        case .budgetExhausted(_, let kind):
-            return ["kind": kind.rawValue]
-        case .escalation(_, let reason):
-            return ["reason": reason]
-        case .info(_, let category, let message):
-            return ["category": category, "message": message]
-        case .unknown(_, _, let payload):
-            return payload
+    /// Rotates when the pending line would push the file past its cap.
+    /// An empty file always accepts its line, so a single oversized event
+    /// cannot spin the rotation forever.
+    private func rotateIfNeeded(incoming: Int) {
+        guard handle != nil, bytesWritten > 0, bytesWritten + incoming > maxFileBytes else { return }
+        let fileManager = FileManager.default
+        try? handle?.synchronize()
+        try? handle?.close()
+        handle = nil
+        if maxFiles > 1 {
+            // Discard the oldest, then shift every surviving generation
+            // one slot up before the current file becomes `.1`.
+            try? fileManager.removeItem(at: Self.archiveURL(base: url, generation: maxFiles - 1))
+            var generation = maxFiles - 2
+            while generation >= 1 {
+                let source = Self.archiveURL(base: url, generation: generation)
+                if fileManager.fileExists(atPath: source.path) {
+                    let destination = Self.archiveURL(base: url, generation: generation + 1)
+                    try? fileManager.removeItem(at: destination)
+                    try? fileManager.moveItem(at: source, to: destination)
+                }
+                generation -= 1
+            }
+            let firstArchive = Self.archiveURL(base: url, generation: 1)
+            try? fileManager.removeItem(at: firstArchive)
+            try? fileManager.moveItem(at: url, to: firstArchive)
+        } else {
+            try? fileManager.removeItem(at: url)
         }
-    }
-
-    static func ms(_ d: Duration) -> Int {
-        let comps = d.components
-        return Int(comps.seconds * 1000 + comps.attoseconds / 1_000_000_000_000_000)
-    }
-
-    static func verdictLabel(_ v: Verdict) -> String {
-        switch v {
-        case .pass: return "pass"
-        case .repair(let d): return "repair:\(d.verifier)"
-        case .reject(let d): return "reject:\(d.message)"
-        case .escalate(let d): return "escalate:\(d.message)"
+        fileManager.createFile(atPath: url.path, contents: nil)
+        do {
+            let reopened = try FileHandle(forWritingTo: url)
+            try reopened.seekToEnd()
+            handle = reopened
+            bytesWritten = 0
+        } catch {
+            // Fail quiet: tracing must never take the run down. Further
+            // events are dropped until a new tracer is constructed.
+            logger.error("jsonl.rotate_failed url=\(self.url.lastPathComponent, privacy: .public) error=\(String(describing: error), privacy: .public)")
         }
     }
 }
+

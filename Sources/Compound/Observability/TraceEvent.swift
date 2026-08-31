@@ -16,7 +16,10 @@ import Foundation
 /// `default:` arm to remain forward-compatible. ``TraceEventVisitor`` is
 /// the preferred shape for extension-friendly consumers — its default
 /// methods let you handle only the cases you care about.
-public enum TraceEvent: Sendable {
+/// `Codable` (see `TraceCoding.swift`) so a run can be exported, shipped
+/// off-device, replayed, and diffed: ``JSONLTracer`` writes one full event
+/// per line and ``TraceReader`` reads them back.
+public enum TraceEvent: Sendable, Equatable, Codable {
     /// A new run started.
     case runStarted(runID: UUID, prompt: String, budget: Budget, auth: String)
     /// A run ended (success or failure).
@@ -44,6 +47,52 @@ public enum TraceEvent: Sendable {
 
     /// A verifier produced a verdict.
     case verifierEvaluated(runID: UUID, verifier: String, cost: VerifierCost, verdict: Verdict, elapsed: Duration)
+
+    /// A best-of-N turn drew and scored its candidates.
+    ///
+    /// Carries the whole decision: how many candidates were drawn, each
+    /// one's weighted verifier score in draw order, the agreement rate
+    /// across them (`nil` when a single candidate left nothing to compare),
+    /// and which index won. Candidate *text* is deliberately absent — it
+    /// would multiply trace volume by `n` and the winning text already
+    /// reaches the trace through the normal run path.
+    case bestOfNSampled(runID: UUID, candidates: Int, scores: [Double], agreement: Double?, selectedIndex: Int)
+
+    /// A ``HealthMonitor`` circuit breaker changed state.
+    ///
+    /// The full transition is carried — class, both endpoints, and the
+    /// consecutive-failure count behind it — because "why did this device
+    /// stop calling the model" is answerable only from the transition
+    /// sequence, not from a snapshot. `runID` is
+    /// ``HealthMonitor/unattributedRunID`` when the change was observed
+    /// outside a run (a cooldown that elapsed during an inspection).
+    case breakerTransitioned(runID: UUID, signal: DegradationSignal, from: BreakerState, to: BreakerState, failures: Int)
+
+    /// A run was prepared at a degraded rung of the ladder. Emitted once
+    /// per run, before the model transport is constructed, and only when
+    /// the rung is not ``DegradedMode/full``.
+    case degradationApplied(runID: UUID, mode: DegradedMode, reason: String)
+
+    /// The confidence cascade re-ran a turn at a higher escalation rung.
+    /// `confidence` is the agreement rate that failed the bar (`nil` when
+    /// the attempt produced no signal at all), and `attempt` is the
+    /// 1-based number of the escalated attempt.
+    case routingEscalated(runID: UUID, step: String, confidence: Double?, attempt: Int)
+
+    /// One round of an ``IterativeRetrievalAssembler`` loop completed.
+    ///
+    /// `query` is the (already redacted, already length-capped) query the
+    /// round issued; `retrieved` is how many sources came back and
+    /// `newSources` how many of them earlier rounds had not already seen —
+    /// a round with `newSources == 0` is the usual signal that
+    /// reformulation is going in circles. `verdict` is the sufficiency
+    /// label, `"failed"` when assessment threw.
+    case retrievalRound(runID: UUID, round: Int, query: String, retrieved: Int, newSources: Int, verdict: String)
+
+    /// An ``IterativeRetrievalAssembler`` loop stopped. `reason` is the
+    /// raw value of ``IterativeRetrievalAssembler/StopReason``; `rounds`
+    /// and `sources` describe the evidence handed to the inner assembler.
+    case retrievalLoopEnded(runID: UUID, rounds: Int, sources: Int, reason: String)
 
     /// The control loop scheduled a repair turn from a `.repair` verdict.
     case repairScheduled(runID: UUID, attempt: Int, diagnostic: Diagnostic)
@@ -74,6 +123,12 @@ public enum TraceEvent: Sendable {
              .toolArgumentRejected(let id, _, _),
              .toolOutputRejected(let id, _, _),
              .verifierEvaluated(let id, _, _, _, _),
+             .bestOfNSampled(let id, _, _, _, _),
+             .breakerTransitioned(let id, _, _, _, _),
+             .degradationApplied(let id, _, _),
+             .routingEscalated(let id, _, _, _),
+             .retrievalRound(let id, _, _, _, _, _),
+             .retrievalLoopEnded(let id, _, _, _),
              .repairScheduled(let id, _, _),
              .budgetExhausted(let id, _),
              .escalation(let id, _),
@@ -97,6 +152,12 @@ public enum TraceEvent: Sendable {
         case .toolArgumentRejected: return "tool.argument.rejected"
         case .toolOutputRejected: return "tool.output.rejected"
         case .verifierEvaluated: return "verifier.evaluated"
+        case .bestOfNSampled: return "sampling.best_of_n"
+        case .breakerTransitioned: return "health.breaker"
+        case .degradationApplied: return "health.degraded"
+        case .routingEscalated: return "routing.escalated"
+        case .retrievalRound: return "retrieval.round"
+        case .retrievalLoopEnded: return "retrieval.loop_ended"
         case .repairScheduled: return "repair.scheduled"
         case .budgetExhausted: return "budget.exhausted"
         case .escalation: return "escalation"
@@ -125,6 +186,19 @@ public protocol TraceEventVisitor: Sendable {
     func visitToolArgumentRejected(runID: UUID, tool: String, diagnostic: Diagnostic) async
     func visitToolOutputRejected(runID: UUID, tool: String, diagnostic: Diagnostic) async
     func visitVerifierEvaluated(runID: UUID, verifier: String, cost: VerifierCost, verdict: Verdict, elapsed: Duration) async
+    func visitBestOfNSampled(runID: UUID, candidates: Int, scores: [Double], agreement: Double?, selectedIndex: Int) async
+    func visitBreakerTransitioned(runID: UUID, signal: DegradationSignal, from: BreakerState, to: BreakerState, failures: Int) async
+    func visitDegradationApplied(runID: UUID, mode: DegradedMode, reason: String) async
+    func visitRoutingEscalated(runID: UUID, step: String, confidence: Double?, attempt: Int) async
+    func visitRetrievalRound(
+        runID: UUID,
+        round: Int,
+        query: String,
+        retrieved: Int,
+        newSources: Int,
+        verdict: String
+    ) async
+    func visitRetrievalLoopEnded(runID: UUID, rounds: Int, sources: Int, reason: String) async
     func visitRepairScheduled(runID: UUID, attempt: Int, diagnostic: Diagnostic) async
     func visitBudgetExhausted(runID: UUID, kind: BudgetExhaustion) async
     func visitEscalation(runID: UUID, reason: String) async
@@ -144,6 +218,19 @@ public extension TraceEventVisitor {
     func visitToolArgumentRejected(runID _: UUID, tool _: String, diagnostic _: Diagnostic) async {}
     func visitToolOutputRejected(runID _: UUID, tool _: String, diagnostic _: Diagnostic) async {}
     func visitVerifierEvaluated(runID _: UUID, verifier _: String, cost _: VerifierCost, verdict _: Verdict, elapsed _: Duration) async {}
+    func visitBestOfNSampled(runID _: UUID, candidates _: Int, scores _: [Double], agreement _: Double?, selectedIndex _: Int) async {}
+    func visitBreakerTransitioned(runID _: UUID, signal _: DegradationSignal, from _: BreakerState, to _: BreakerState, failures _: Int) async {}
+    func visitDegradationApplied(runID _: UUID, mode _: DegradedMode, reason _: String) async {}
+    func visitRoutingEscalated(runID _: UUID, step _: String, confidence _: Double?, attempt _: Int) async {}
+    func visitRetrievalRound(
+        runID _: UUID,
+        round _: Int,
+        query _: String,
+        retrieved _: Int,
+        newSources _: Int,
+        verdict _: String
+    ) async {}
+    func visitRetrievalLoopEnded(runID _: UUID, rounds _: Int, sources _: Int, reason _: String) async {}
     func visitRepairScheduled(runID _: UUID, attempt _: Int, diagnostic _: Diagnostic) async {}
     func visitBudgetExhausted(runID _: UUID, kind _: BudgetExhaustion) async {}
     func visitEscalation(runID _: UUID, reason _: String) async {}
@@ -177,6 +264,31 @@ public extension TraceEvent {
             await visitor.visitToolOutputRejected(runID: id, tool: tool, diagnostic: diag)
         case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
             await visitor.visitVerifierEvaluated(runID: id, verifier: v, cost: cost, verdict: verdict, elapsed: elapsed)
+        case .bestOfNSampled(let id, let candidates, let scores, let agreement, let selected):
+            await visitor.visitBestOfNSampled(
+                runID: id,
+                candidates: candidates,
+                scores: scores,
+                agreement: agreement,
+                selectedIndex: selected
+            )
+        case .breakerTransitioned(let id, let signal, let from, let to, let failures):
+            await visitor.visitBreakerTransitioned(runID: id, signal: signal, from: from, to: to, failures: failures)
+        case .degradationApplied(let id, let mode, let reason):
+            await visitor.visitDegradationApplied(runID: id, mode: mode, reason: reason)
+        case .routingEscalated(let id, let step, let confidence, let attempt):
+            await visitor.visitRoutingEscalated(runID: id, step: step, confidence: confidence, attempt: attempt)
+        case .retrievalRound(let id, let round, let query, let retrieved, let new, let verdict):
+            await visitor.visitRetrievalRound(
+                runID: id,
+                round: round,
+                query: query,
+                retrieved: retrieved,
+                newSources: new,
+                verdict: verdict
+            )
+        case .retrievalLoopEnded(let id, let rounds, let sources, let reason):
+            await visitor.visitRetrievalLoopEnded(runID: id, rounds: rounds, sources: sources, reason: reason)
         case .repairScheduled(let id, let attempt, let diag):
             await visitor.visitRepairScheduled(runID: id, attempt: attempt, diagnostic: diag)
         case .budgetExhausted(let id, let kind):

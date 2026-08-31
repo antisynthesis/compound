@@ -155,7 +155,8 @@ struct TracerTests {
         let content = try String(contentsOf: url, encoding: .utf8)
         let lines = content.split(separator: "\n", omittingEmptySubsequences: true)
         #expect(lines.count == 2)
-        #expect(lines[0].contains("\"label\":\"info\""))
+        #expect(lines[0].contains("\"type\":\"info\""))
+        #expect(lines[0].contains("\"message\":\"hello\""))
     }
 
     @Test("JSONL tracer every-event flush writes lines")

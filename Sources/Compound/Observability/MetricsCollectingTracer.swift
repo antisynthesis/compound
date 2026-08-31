@@ -66,7 +66,9 @@ public actor MetricsCollectingTracer: Tracer {
         case .escalation:
             snapshot.escalations += 1
 
-        case .modelInvocationStarted, .toolInvocationRequested, .info, .unknown:
+        case .modelInvocationStarted, .toolInvocationRequested, .bestOfNSampled,
+             .breakerTransitioned, .degradationApplied, .routingEscalated,
+             .retrievalRound, .retrievalLoopEnded, .info, .unknown:
             break
         }
     }

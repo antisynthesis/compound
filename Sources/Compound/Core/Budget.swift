@@ -13,7 +13,7 @@ import Foundation
 /// let budget = Budget(maxTurns: 4, wallClock: .seconds(20))
 /// let loop = ControlLoop(budget: budget, outputVerifier: chain)
 /// ```
-public struct Budget: Sendable, Equatable {
+public struct Budget: Sendable, Equatable, Codable {
     /// Maximum number of control-loop turns (model invocations) per run.
     public var maxTurns: Int
     /// Maximum number of tool invocations per run.
@@ -37,6 +37,19 @@ public struct Budget: Sendable, Equatable {
     /// Optional cap on the cumulative approximate output-token count
     /// observed across all turns. `nil` disables the cap.
     public var maxTotalOutputTokens: Int?
+    /// Optional cap on the number of **candidate samples** drawn across
+    /// the run by ``SamplingStrategy/bestOf(n:selection:variation:)``.
+    ///
+    /// ``maxTurns`` bounds loop *iterations*, not model calls: a best-of-N
+    /// turn issues up to `n` model calls, so `maxTurns × n` is the real
+    /// upper bound on model invocations. `maxSamples` is the direct cap on
+    /// that multiplied cost. `nil` (the default) leaves sampling bounded
+    /// only by ``maxTurns``, ``wallClock``, and ``maxTotalOutputTokens``.
+    ///
+    /// Single-candidate runs never debit this dimension (see
+    /// ``BudgetUsage/samples``), so a non-nil cap constrains best-of-N
+    /// sampling and nothing else.
+    public var maxSamples: Int?
 
     /// Creates a budget. Each numeric component is precondition-checked
     /// (positive for turns, non-negative for tool calls and repair
@@ -48,11 +61,13 @@ public struct Budget: Sendable, Equatable {
         wallClock: Duration = .seconds(60),
         firstToken: Duration? = nil,
         interChunkGap: Duration? = nil,
-        maxTotalOutputTokens: Int? = nil
+        maxTotalOutputTokens: Int? = nil,
+        maxSamples: Int? = nil
     ) {
         precondition(maxTurns > 0, "maxTurns must be positive")
         precondition(maxToolCalls >= 0, "maxToolCalls must be non-negative")
         precondition(maxRepairAttempts >= 0, "maxRepairAttempts must be non-negative")
+        precondition(maxSamples.map { $0 >= 0 } ?? true, "maxSamples must be non-negative")
         self.maxTurns = maxTurns
         self.maxToolCalls = maxToolCalls
         self.maxRepairAttempts = maxRepairAttempts
@@ -60,6 +75,7 @@ public struct Budget: Sendable, Equatable {
         self.firstToken = firstToken
         self.interChunkGap = interChunkGap
         self.maxTotalOutputTokens = maxTotalOutputTokens
+        self.maxSamples = maxSamples
     }
 
     /// Conservative defaults intended for general-purpose interactive use.
@@ -85,7 +101,7 @@ public struct Budget: Sendable, Equatable {
 /// Running tally of resources consumed by a single Compound run, mutated
 /// by the control loop and surfaced on ``LoopOutcome`` and
 /// ``CompoundError/budgetExhausted(_:_:)``.
-public struct BudgetUsage: Sendable, Equatable {
+public struct BudgetUsage: Sendable, Equatable, Codable {
     /// Number of model turns begun. Turns are recorded check-then-record,
     /// so a turn refused by the budget is never counted.
     public var turns: Int = 0
@@ -97,12 +113,22 @@ public struct BudgetUsage: Sendable, Equatable {
     public var elapsed: Duration = .zero
     /// Approximate output tokens observed across all turns.
     public var outputTokens: Int = 0
+    /// Number of candidate samples drawn by best-of-N sampling.
+    ///
+    /// Zero for every single-candidate run: this counter exists to make
+    /// the *multiplied* cost of ``SamplingStrategy/bestOf(n:selection:variation:)``
+    /// visible and cappable (``Budget/maxSamples``) without changing what
+    /// ``turns`` has always meant. Every drawn candidate is counted,
+    /// including the ones the selection policy discards.
+    public var samples: Int = 0
 
     /// Creates a zeroed-out usage counter.
     public init() {}
 
     /// Increments the turn counter.
     public mutating func recordTurn() { turns += 1 }
+    /// Increments the best-of-N candidate-sample counter.
+    public mutating func recordSample() { samples += 1 }
     /// Increments the tool-call counter.
     public mutating func recordToolCall() { toolCalls += 1 }
     /// Increments the repair-attempt counter.
@@ -116,7 +142,7 @@ public struct BudgetUsage: Sendable, Equatable {
 /// Identifies which dimension of a ``Budget`` was first exhausted during
 /// a run. Returned by ``Budget/remaining(_:)`` and embedded in
 /// ``CompoundError/budgetExhausted(_:_:)``.
-public enum BudgetExhaustion: String, Sendable, Equatable {
+public enum BudgetExhaustion: String, Sendable, Equatable, Codable {
     /// `maxTurns` was reached.
     case turns
     /// `maxToolCalls` was reached.
@@ -135,6 +161,136 @@ public enum BudgetExhaustion: String, Sendable, Equatable {
     case interChunkGap
     /// `maxTotalOutputTokens` was reached.
     case outputTokens
+    /// ``Budget/maxSamples`` was reached while drawing best-of-N
+    /// candidates. Only best-of-N runs can trip this dimension.
+    case samples
+}
+
+// MARK: - Codable
+
+/// Wire representation for `Duration` shared by every ``Codable`` type in
+/// the framework: whole nanoseconds as an `Int64`.
+///
+/// `Duration`'s stdlib conformance encodes an opaque high/low pair, which
+/// round-trips but is unreadable in an exported trace. Nanoseconds are
+/// exact for every duration Compound produces (millisecond and second
+/// literals, clock measurements) and saturate rather than trap on the
+/// astronomically large values `Duration` can otherwise represent.
+enum DurationCoding {
+    /// Whole nanoseconds in `duration`, saturating at `Int64` bounds.
+    static func nanoseconds(_ duration: Duration) -> Int64 {
+        let parts = duration.components
+        let saturated: Int64 = parts.seconds < 0 ? .min : .max
+        let (scaled, overflowedScale) = parts.seconds.multipliedReportingOverflow(by: 1_000_000_000)
+        if overflowedScale { return saturated }
+        let (total, overflowedSum) = scaled.addingReportingOverflow(parts.attoseconds / 1_000_000_000)
+        return overflowedSum ? saturated : total
+    }
+
+    /// Inverse of ``nanoseconds(_:)``.
+    static func duration(nanoseconds: Int64) -> Duration {
+        .nanoseconds(nanoseconds)
+    }
+}
+
+extension Budget {
+    /// Wire keys. Durations are suffixed `_ns` to make the unit explicit
+    /// in exported traces.
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case maxTurns = "max_turns"
+        case maxToolCalls = "max_tool_calls"
+        case maxRepairAttempts = "max_repair_attempts"
+        case wallClock = "wall_clock_ns"
+        case firstToken = "first_token_ns"
+        case interChunkGap = "inter_chunk_gap_ns"
+        case maxTotalOutputTokens = "max_total_output_tokens"
+        case maxSamples = "max_samples"
+    }
+
+    /// Encodes every dimension, durations as whole nanoseconds.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(maxTurns, forKey: .maxTurns)
+        try container.encode(maxToolCalls, forKey: .maxToolCalls)
+        try container.encode(maxRepairAttempts, forKey: .maxRepairAttempts)
+        try container.encode(DurationCoding.nanoseconds(wallClock), forKey: .wallClock)
+        try container.encodeIfPresent(firstToken.map(DurationCoding.nanoseconds), forKey: .firstToken)
+        try container.encodeIfPresent(interChunkGap.map(DurationCoding.nanoseconds), forKey: .interChunkGap)
+        try container.encodeIfPresent(maxTotalOutputTokens, forKey: .maxTotalOutputTokens)
+        try container.encodeIfPresent(maxSamples, forKey: .maxSamples)
+    }
+
+    /// Decodes a budget, *validating* the same invariants the memberwise
+    /// initializer preconditions on. A corrupt or hostile trace file must
+    /// surface a `DecodingError` rather than trap the process, so the
+    /// checks are throwing rather than `precondition`.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let turns = try container.decode(Int.self, forKey: .maxTurns)
+        let toolCalls = try container.decode(Int.self, forKey: .maxToolCalls)
+        let repairs = try container.decode(Int.self, forKey: .maxRepairAttempts)
+        guard turns > 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .maxTurns, in: container, debugDescription: "maxTurns must be positive")
+        }
+        guard toolCalls >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .maxToolCalls, in: container, debugDescription: "maxToolCalls must be non-negative")
+        }
+        guard repairs >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .maxRepairAttempts, in: container, debugDescription: "maxRepairAttempts must be non-negative")
+        }
+        let samples = try container.decodeIfPresent(Int.self, forKey: .maxSamples)
+        guard samples.map({ $0 >= 0 }) ?? true else {
+            throw DecodingError.dataCorruptedError(forKey: .maxSamples, in: container, debugDescription: "maxSamples must be non-negative")
+        }
+        self.init(
+            maxTurns: turns,
+            maxToolCalls: toolCalls,
+            maxRepairAttempts: repairs,
+            wallClock: DurationCoding.duration(nanoseconds: try container.decode(Int64.self, forKey: .wallClock)),
+            firstToken: try container.decodeIfPresent(Int64.self, forKey: .firstToken).map(DurationCoding.duration(nanoseconds:)),
+            interChunkGap: try container.decodeIfPresent(Int64.self, forKey: .interChunkGap).map(DurationCoding.duration(nanoseconds:)),
+            maxTotalOutputTokens: try container.decodeIfPresent(Int.self, forKey: .maxTotalOutputTokens),
+            maxSamples: samples
+        )
+    }
+}
+
+extension BudgetUsage {
+    /// Wire keys; `elapsed` is whole nanoseconds.
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case turns
+        case toolCalls = "tool_calls"
+        case repairAttempts = "repair_attempts"
+        case elapsed = "elapsed_ns"
+        case outputTokens = "output_tokens"
+        case samples
+    }
+
+    /// Encodes the accumulated counters.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(turns, forKey: .turns)
+        try container.encode(toolCalls, forKey: .toolCalls)
+        try container.encode(repairAttempts, forKey: .repairAttempts)
+        try container.encode(DurationCoding.nanoseconds(elapsed), forKey: .elapsed)
+        try container.encode(outputTokens, forKey: .outputTokens)
+        try container.encode(samples, forKey: .samples)
+    }
+
+    /// Decodes counters, tolerating absent keys so older trace files keep
+    /// reading as the struct grows dimensions.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init()
+        turns = try container.decodeIfPresent(Int.self, forKey: .turns) ?? 0
+        toolCalls = try container.decodeIfPresent(Int.self, forKey: .toolCalls) ?? 0
+        repairAttempts = try container.decodeIfPresent(Int.self, forKey: .repairAttempts) ?? 0
+        elapsed = DurationCoding.duration(
+            nanoseconds: try container.decodeIfPresent(Int64.self, forKey: .elapsed) ?? 0
+        )
+        outputTokens = try container.decodeIfPresent(Int.self, forKey: .outputTokens) ?? 0
+        samples = try container.decodeIfPresent(Int.self, forKey: .samples) ?? 0
+    }
 }
 
 extension Budget {
@@ -167,6 +323,7 @@ extension Budget {
         case .turns: projected.recordTurn()
         case .toolCalls: projected.recordToolCall()
         case .repairAttempts: projected.recordRepair()
+        case .samples: projected.recordSample()
         // Continuous dimensions have no per-occurrence projection, and the
         // stream-stall dimensions are tripped only mid-stream by the
         // streaming loop's watchdog — never by this between-turn check.
@@ -175,6 +332,7 @@ extension Budget {
         if projected.turns > maxTurns { return .turns }
         if projected.toolCalls > maxToolCalls { return .toolCalls }
         if projected.repairAttempts > maxRepairAttempts { return .repairAttempts }
+        if let cap = maxSamples, projected.samples > cap { return .samples }
         if projected.elapsed >= wallClock { return .wallClock }
         if let cap = maxTotalOutputTokens, projected.outputTokens >= cap { return .outputTokens }
         return nil
@@ -194,6 +352,7 @@ extension Budget {
         if usage.turns >= maxTurns { return .turns }
         if usage.toolCalls >= maxToolCalls { return .toolCalls }
         if usage.repairAttempts >= maxRepairAttempts { return .repairAttempts }
+        if let cap = maxSamples, usage.samples >= cap { return .samples }
         if usage.elapsed >= wallClock { return .wallClock }
         if let cap = maxTotalOutputTokens, usage.outputTokens >= cap { return .outputTokens }
         return nil

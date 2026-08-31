@@ -176,6 +176,35 @@ extension ModelResponding {
     }
 }
 
+// MARK: - Per-sample generation variation
+
+extension GenerationOptions {
+    /// Returns a copy of these options perturbed for candidate `index` of a
+    /// best-of-N draw (see ``SamplingStrategy/bestOf(n:selection:variation:)``).
+    ///
+    /// This is the one place in the framework that translates a
+    /// ``SampleVariation`` into FoundationModels' own knobs, which keeps
+    /// ``BestOfNSampler`` free of sampling-mode details and keeps the
+    /// translation testable without a model. Fields the variation does not
+    /// speak to are carried over untouched, so a caller's
+    /// `maximumResponseTokens` (and, on OS 27+, `toolCallingMode`) survive.
+    ///
+    /// ``ModelResponding`` conformers are free to ignore the options
+    /// entirely — the protocol makes no promise that a backend honors
+    /// temperature or seeds — in which case best-of-N still works and its
+    /// candidates are simply however diverse the backend makes them.
+    public func varied(forSample index: Int, by variation: SampleVariation) -> GenerationOptions {
+        var options = self
+        if let temperature = variation.temperature(forSample: index) {
+            options.temperature = temperature
+        }
+        if let seed = variation.seed(forSample: index) {
+            options.samplingMode = .random(top: variation.topK, seed: seed)
+        }
+        return options
+    }
+}
+
 /// Result of a streaming model call.
 ///
 /// ``stream`` yields delta chunks (the suffix added since the previous

@@ -331,6 +331,43 @@ struct LoopCore: Sendable {
         }
     }
 
+    /// Best-of-N counterpart of ``settle(output:originalTask:usage:started:runContext:isFinal:)``.
+    ///
+    /// The chain has already run — once per candidate — inside
+    /// ``BestOfNSampler``, so this disposes the *selected* candidate's
+    /// verdict without re-verifying it. Re-running the chain here would
+    /// double every verifier's cost and, for a verifier with any
+    /// nondeterminism, could contradict the verdict the selection was based
+    /// on. The losing candidates contribute nothing: their diagnostics are
+    /// never fed to a repair turn, because a repair prompt describing an
+    /// output the model is not being asked to fix is worse than no prompt.
+    func settleSelected(
+        _ draw: BestOfNDraw,
+        originalTask: String,
+        usage: inout BudgetUsage,
+        started: ContinuousClock.Instant,
+        runContext: RunContext,
+        isFinal: Bool = true
+    ) async throws -> LoopStep {
+        usage.toolCalls = await runContext.toolCallMeter.count
+        let selected = draw.selected
+        switch try await dispose(
+            verdict: selected.verdict,
+            diagnostics: selected.diagnostics,
+            renderedOutput: selected.output,
+            originalTask: originalTask,
+            usage: &usage,
+            started: started,
+            runContext: runContext,
+            isFinal: isFinal
+        ) {
+        case .pass:
+            return .done(selected.output)
+        case .repair(let nextPrompt):
+            return .repair(nextPrompt: nextPrompt)
+        }
+    }
+
     /// Typed-loop counterpart of ``settle(output:originalTask:usage:started:runContext:isFinal:)``:
     /// runs `verifiers` over the extracted `value` and disposes of the
     /// verdict with the exact same budget, trace, and repair semantics as
@@ -505,22 +542,7 @@ struct LoopCore: Sendable {
         }
 
         for member in chain.members {
-            emit(.verifierStarted(name: member.name, cost: member.cost))
-            await runContext.progress.report(.verifierStarted(name: member.name, cost: member.cost))
-            let started = ContinuousClock.now
-            let verdict = try await member.verify(input, context: runContext)
-            let elapsed = ContinuousClock.now - started
-            await runContext.tracer.record(
-                .verifierEvaluated(
-                    runID: runContext.runID,
-                    verifier: member.name,
-                    cost: member.cost,
-                    verdict: verdict,
-                    elapsed: elapsed
-                )
-            )
-            emit(.verifierCompleted(name: member.name, verdict: verdict))
-            await runContext.progress.report(.verifierCompleted(name: member.name, verdict: verdict))
+            let verdict = try await evaluate(member, input: input, runContext: runContext)
             switch verdict {
             case .pass:
                 continue
@@ -538,6 +560,73 @@ struct LoopCore: Sendable {
 
         guard !collected.isEmpty else { return (.pass, []) }
         return (.repair(.combined(collected, verifier: chain.name)), collected)
+    }
+
+    /// Runs one chain member, emitting the paired progress events and the
+    /// `verifierEvaluated` trace event. Shared by the single-candidate
+    /// traversal and the best-of-N per-member traversal so a verifier is
+    /// observed identically whichever path reached it.
+    private func evaluate<Input: Sendable>(
+        _ member: AnyVerifier<Input>,
+        input: Input,
+        runContext: RunContext
+    ) async throws -> Verdict {
+        emit(.verifierStarted(name: member.name, cost: member.cost))
+        await runContext.progress.report(.verifierStarted(name: member.name, cost: member.cost))
+        let started = ContinuousClock.now
+        let verdict = try await member.verify(input, context: runContext)
+        let elapsed = ContinuousClock.now - started
+        await runContext.tracer.record(
+            .verifierEvaluated(
+                runID: runContext.runID,
+                verifier: member.name,
+                cost: member.cost,
+                verdict: verdict,
+                elapsed: elapsed
+            )
+        )
+        emit(.verifierCompleted(name: member.name, verdict: verdict))
+        await runContext.progress.report(.verifierCompleted(name: member.name, verdict: verdict))
+        return verdict
+    }
+
+    /// Runs **every** chain member over `input` and returns each member's
+    /// own verdict, paired with the weight `weight` assigns it.
+    ///
+    /// Best-of-N needs per-member verdicts, not a folded chain verdict: a
+    /// weighted score is undefined unless you know which verifiers a
+    /// candidate satisfied. That means the chain's
+    /// ``VerifierChain/Mode/shortCircuit`` mode is deliberately *not*
+    /// honored here — a short-circuiting chain would score every failing
+    /// candidate identically and best-of-N would degenerate to picking the
+    /// first one. Terminal verdicts (``Verdict/reject(_:)``,
+    /// ``Verdict/escalate(_:)``) still stop the traversal: the candidate is
+    /// already disqualified and further verifier cost buys nothing.
+    func evaluateMembers<Input: Sendable>(
+        chain: VerifierChain<Input>,
+        input: Input,
+        runContext: RunContext,
+        weight: (String) -> Double
+    ) async throws -> [SampledCandidate.MemberVerdict] {
+        var out: [SampledCandidate.MemberVerdict] = []
+        out.reserveCapacity(chain.members.count)
+        for member in chain.members {
+            let verdict = try await evaluate(member, input: input, runContext: runContext)
+            out.append(
+                SampledCandidate.MemberVerdict(
+                    verifier: member.name,
+                    verdict: verdict,
+                    weight: weight(member.name)
+                )
+            )
+            switch verdict {
+            case .pass, .repair:
+                continue
+            case .reject, .escalate:
+                return out
+            }
+        }
+        return out
     }
 
     /// Counts guardrail violations for a single run. Actor-backed because

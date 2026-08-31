@@ -66,6 +66,14 @@ public enum CompoundError: Error, Sendable, CustomStringConvertible {
     /// The system model throttled the request (rate limit or concurrent
     /// request contention). Transient: retry after a backoff.
     case modelRateLimited
+    /// The session refused to invoke the model because the degradation
+    /// ladder is at ``DegradedMode/deterministicOnly`` — repeated typed
+    /// failures tripped a ``HealthMonitor`` circuit breaker, or an
+    /// operator forced the rung by hand. `reason` is the assessment that
+    /// produced the rung. Recoverable: the breaker half-opens after its
+    /// cooldown, and a caller-supplied fallback avoids this error
+    /// entirely (see ``CompoundSession/Configuration/degradedFallback``).
+    case degraded(mode: DegradedMode, reason: String)
     /// Framework-boundary wrapper for `CancellationError`. Wrapping is
     /// optional — `CancellationError` is still thrown directly in most
     /// places; this case exists for the boundaries that prefer to surface
@@ -107,6 +115,8 @@ public enum CompoundError: Error, Sendable, CustomStringConvertible {
             return "unsupported language or locale"
         case .modelRateLimited:
             return "model rate limited"
+        case .degraded(let mode, let reason):
+            return "degraded to \(mode.rawValue): \(reason)"
         case .cancelled:
             return "cancelled"
         case .underlying(let err):
@@ -135,7 +145,8 @@ extension CompoundError {
     public var severity: Severity {
         switch self {
         case .budgetExhausted, .verifierRejected, .toolArgumentRejected, .toolOutputRejected,
-             .escalationRequired, .cancelled, .contextWindowExceeded, .modelRateLimited:
+             .escalationRequired, .cancelled, .contextWindowExceeded, .modelRateLimited,
+             .degraded:
             return .recoverable
         case .policyDenied, .toolUnavailable, .toolDecodeFailed, .toolAlreadyRegistered,
              .modelUnavailable, .underlying, .guardrailViolation, .refusal, .unsupportedLanguage:
@@ -174,7 +185,7 @@ extension CompoundError {
         case .modelUnavailable, .guardrailViolation, .contextWindowExceeded,
              .refusal, .unsupportedLanguage, .modelRateLimited:
             return .model
-        case .cancelled: return .control
+        case .cancelled, .degraded: return .control
         case .underlying: return .unknown
         }
     }
@@ -216,6 +227,8 @@ extension CompoundError: LocalizedError {
             return "the prompt's language or locale is not supported by the on-device model"
         case .modelRateLimited:
             return "the system model throttled the request"
+        case .degraded(let mode, let reason):
+            return "the session is running at the '\(mode.rawValue)' rung of the degradation ladder: \(reason)"
         case .cancelled:
             return "the operation was cancelled"
         case .underlying(let err):
@@ -253,6 +266,8 @@ extension CompoundError: LocalizedError {
             return "Use a language supported by Apple Intelligence on this device."
         case .modelRateLimited:
             return "Back off briefly and retry; the system model is throttling requests."
+        case .degraded:
+            return "Wait for the circuit breaker's cooldown, supply a degradedFallback, or clear the manual override with HealthMonitor.setOverride(nil)."
         case .cancelled:
             return nil
         case .underlying:

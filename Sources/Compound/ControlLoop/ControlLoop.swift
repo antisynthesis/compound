@@ -9,6 +9,16 @@ public struct LoopOutcome: Sendable {
     public let usage: BudgetUsage
     /// Identifier from the originating ``RunContext``.
     public let runID: UUID
+    /// Agreement-rate confidence for the turn that produced ``output``:
+    /// the mean pairwise ``AgreementRate`` across that turn's candidates.
+    ///
+    /// `nil` whenever the signal is undefined — every ``SamplingStrategy/single``
+    /// run, and any best-of-N turn that drew only one candidate (which
+    /// ``SelectionPolicy/firstPassing`` does whenever the first draw
+    /// passes). It is *not* a probability of correctness: it says how much
+    /// the model agreed with itself, which is evidence about confidence and
+    /// nothing else.
+    public let confidence: Double?
 }
 
 /// How the typed loop turns a prompt into a structured value.
@@ -47,6 +57,11 @@ public struct TypedRunOutcome<T: Sendable>: Sendable {
     public let usage: BudgetUsage
     /// Identifier from the originating ``RunContext``.
     public let runID: UUID
+    /// Agreement-rate confidence for the *reasoning* phase's final turn, or
+    /// `nil` when the run drew a single candidate — which includes every
+    /// ``TypedRunMode/direct`` run, since extraction is a constrained
+    /// decoding pass and is never sampled best-of-N.
+    public let confidence: Double?
 }
 
 /// Orchestrates the propose-and-check loop. Asks a ``ModelResponding``
@@ -91,6 +106,13 @@ public struct ControlLoop: Sendable {
     /// is required for stateless ``ModelResponding`` conformers; stateful
     /// conformers may use ``RepairPromptBuilder/diagnosticOnly``.
     public let repairPromptBuilder: RepairPromptBuilder
+    /// How many candidates each free-form turn draws and how one is
+    /// selected. ``SamplingStrategy/single`` (the default) preserves the
+    /// historical one-call-per-turn behavior exactly.
+    ///
+    /// Only free-form turns sample — the typed loop's extraction phase is
+    /// always a single constrained-decoding call.
+    public let sampling: SamplingStrategy
 
     /// Creates a control loop.
     public init(
@@ -99,7 +121,8 @@ public struct ControlLoop: Sendable {
         generationOptions: GenerationOptions = GenerationOptions(),
         retryPolicy: RetryPolicy = .default,
         retryClassifier: any RetryClassifier = DefaultRetryClassifier(),
-        repairPromptBuilder: RepairPromptBuilder = .default
+        repairPromptBuilder: RepairPromptBuilder = .default,
+        sampling: SamplingStrategy = .single
     ) {
         self.budget = budget
         self.outputVerifier = outputVerifier
@@ -107,6 +130,7 @@ public struct ControlLoop: Sendable {
         self.retryPolicy = retryPolicy
         self.retryClassifier = retryClassifier
         self.repairPromptBuilder = repairPromptBuilder
+        self.sampling = sampling
     }
 
     /// Runs the propose-and-check loop until one of:
@@ -152,7 +176,7 @@ public struct ControlLoop: Sendable {
             )
         )
 
-        let output = try await freeformPhase(
+        let phase = try await freeformPhase(
             prompt: prompt,
             modelClient: modelClient,
             core: core,
@@ -161,7 +185,12 @@ public struct ControlLoop: Sendable {
             runContext: runContext,
             isFinal: true
         )
-        return LoopOutcome(output: output, usage: usage, runID: runContext.runID)
+        return LoopOutcome(
+            output: phase.output,
+            usage: usage,
+            runID: runContext.runID,
+            confidence: phase.confidence
+        )
     }
 
     /// Runs the typed control loop: same propose-and-check discipline as
@@ -236,6 +265,7 @@ public struct ControlLoop: Sendable {
         // isFinal: false defers the successful run-ended trace to the
         // typed settle.
         var reasoning: String?
+        var confidence: Double?
         var extractionSource = prompt
         if mode == .reasonThenExtract {
             let freeform = try await freeformPhase(
@@ -247,8 +277,9 @@ public struct ControlLoop: Sendable {
                 runContext: runContext,
                 isFinal: false
             )
-            reasoning = freeform
-            extractionSource = freeform
+            reasoning = freeform.output
+            confidence = freeform.confidence
+            extractionSource = freeform.output
         }
 
         // Phase two: structured extraction, no tools, typed chain gating.
@@ -282,7 +313,8 @@ public struct ControlLoop: Sendable {
                     value: final,
                     reasoning: reasoning,
                     usage: usage,
-                    runID: runContext.runID
+                    runID: runContext.runID,
+                    confidence: confidence
                 )
             case .repair(let next):
                 nextInput = next
@@ -296,6 +328,13 @@ public struct ControlLoop: Sendable {
     /// `isFinal` is forwarded to ``LoopCore/settle(output:originalTask:usage:started:runContext:isFinal:)``
     /// so the typed run can defer the successful run-ended trace to its
     /// extraction phase.
+    ///
+    /// Under ``SamplingStrategy/bestOf(n:selection:variation:)`` each
+    /// iteration draws up to `n` candidates through ``BestOfNSampler`` and
+    /// settles the selected one; the repair path, budget accounting, and
+    /// terminal dispositions are otherwise untouched. The returned
+    /// `confidence` is the agreement rate of the *last* turn — the one that
+    /// actually produced the returned output.
     private func freeformPhase(
         prompt: String,
         modelClient: any ModelResponding,
@@ -304,33 +343,63 @@ public struct ControlLoop: Sendable {
         started: ContinuousClock.Instant,
         runContext: RunContext,
         isFinal: Bool
-    ) async throws -> String {
+    ) async throws -> (output: String, confidence: Double?) {
         var nextPrompt = prompt
+        var confidence: Double?
 
         while true {
             try await core.beginTurn(usage: &usage, started: started, runContext: runContext)
 
             let turnPrompt = nextPrompt
-            let output = try await core.invokeModel(
-                usage: &usage,
-                started: started,
-                runContext: runContext
-            ) {
-                try await modelClient.respond(to: turnPrompt, options: generationOptions)
+            let step: LoopStep
+            if case .bestOf(let n, let selection, let variation) = sampling {
+                let sampler = BestOfNSampler(
+                    sampleCount: n,
+                    selection: selection,
+                    variation: variation,
+                    chain: outputVerifier,
+                    baseOptions: generationOptions
+                )
+                let draw = try await sampler.draw(
+                    prompt: turnPrompt,
+                    modelClient: modelClient,
+                    core: core,
+                    usage: &usage,
+                    started: started,
+                    runContext: runContext
+                )
+                confidence = draw.agreement
+                step = try await core.settleSelected(
+                    draw,
+                    originalTask: prompt,
+                    usage: &usage,
+                    started: started,
+                    runContext: runContext,
+                    isFinal: isFinal
+                )
+            } else {
+                let output = try await core.invokeModel(
+                    usage: &usage,
+                    started: started,
+                    runContext: runContext
+                ) {
+                    try await modelClient.respond(to: turnPrompt, options: generationOptions)
+                }
+                try Task.checkCancellation()
+                usage.recordOutputTokens(Budget.approximateTokens(output))
+                step = try await core.settle(
+                    output: output,
+                    originalTask: prompt,
+                    usage: &usage,
+                    started: started,
+                    runContext: runContext,
+                    isFinal: isFinal
+                )
             }
-            try Task.checkCancellation()
-            usage.recordOutputTokens(Budget.approximateTokens(output))
 
-            switch try await core.settle(
-                output: output,
-                originalTask: prompt,
-                usage: &usage,
-                started: started,
-                runContext: runContext,
-                isFinal: isFinal
-            ) {
+            switch step {
             case .done(let final):
-                return final
+                return (final, confidence)
             case .repair(let next):
                 nextPrompt = next
             }

@@ -134,6 +134,8 @@ public struct IntentBridgeError: Swift.Error, CustomLocalizedStringResourceConve
             return "This language isn't supported by the on-device model."
         case .modelRateLimited:
             return "The model is busy. Try again shortly."
+        case .degraded:
+            return "The assistant is running in a reduced mode and can't answer right now."
         case .cancelled:
             return "Operation cancelled."
         case .underlying(let error):

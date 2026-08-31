@@ -1,15 +1,34 @@
 import Foundation
 
 /// Wraps another ``Tracer`` and applies a chain of ``Redactor`` rules to
-/// every string-valued field on each ``TraceEvent`` before forwarding to
-/// the inner tracer. The symmetric counterpart to running redactors on
-/// model-bound prompts: anything that goes back out through the trace
-/// pipe (OSLog, JSONL on disk, a remote sink) gets the same scrubbing.
+/// every string in every ``TraceEvent`` before forwarding it. The
+/// symmetric counterpart to running redactors on model-bound prompts:
+/// anything that goes back out through the trace pipe (OSLog, JSONL on
+/// disk, a remote sink) gets the same scrubbing.
 ///
-/// Numeric fields (counts, durations, byte sizes) and identifiers
-/// (UUIDs, ``VerifierCost`` raw values, ``BudgetExhaustion`` raw values)
-/// are passed through unchanged — they have no plausible secret content
-/// and redaction would only obscure telemetry.
+/// Redaction is **structural, not case-enumerated**. The event is encoded
+/// through its ``Codable`` conformance, every string in the resulting
+/// tree is scrubbed, and the tree is decoded back into a `TraceEvent`.
+/// Nothing here switches over the enum, so a case added to ``TraceEvent``
+/// tomorrow is covered the day it lands — the old design enumerated cases
+/// and leaked by omission the moment someone forgot an arm.
+///
+/// Two categories of value are passed through untouched:
+/// - **Numbers, booleans, and durations** (counts, byte sizes, elapsed
+///   times) have no plausible secret content and redacting them would
+///   only destroy telemetry.
+/// - **Load-bearing identifiers** — the case discriminator, the run UUID,
+///   the budget-dimension name, the timestamp — because rewriting them
+///   would break decoding or run correlation, and none can carry user
+///   content. Every other string, including dictionary keys inside
+///   caller-supplied payloads, is scrubbed.
+///
+/// If an event cannot be encoded, scrubbed, and decoded cleanly, the
+/// tracer **fails closed**: the original event is withheld and a
+/// payload-free placeholder labeled
+/// ``TraceEvent/redactionFailedLabel`` is forwarded in its place, so the
+/// gap is visible in the trace without leaking what could not be
+/// scrubbed.
 public struct RedactingTracer: Tracer {
     private let inner: any Tracer
     private let redactors: [any Redactor]
@@ -20,70 +39,55 @@ public struct RedactingTracer: Tracer {
         self.redactors = redactors
     }
 
-    /// Scrubs string fields in `event` and forwards to the inner tracer.
+    /// Scrubs `event` and forwards the result to the inner tracer.
     public func record(_ event: TraceEvent) async {
         await inner.record(redact(event))
     }
 
-    private func scrub(_ s: String) -> String {
-        redactors.reduce(s) { acc, r in r.redact(acc) }
-    }
-
-    private func redact(_ event: TraceEvent) -> TraceEvent {
-        switch event {
-        case .runStarted(let id, let prompt, let budget, let auth):
-            return .runStarted(runID: id, prompt: scrub(prompt), budget: budget, auth: scrub(auth))
-        case .runEnded:
-            return event
-        case .modelInvocationStarted:
-            return event
-        case .modelInvocationCompleted:
-            return event
-        case .modelInvocationFailed(let id, let turn, let reason):
-            return .modelInvocationFailed(runID: id, turn: turn, reason: scrub(reason))
-        case .toolInvocationRequested(let id, let tool):
-            return .toolInvocationRequested(runID: id, tool: scrub(tool))
-        case .toolInvocationCompleted(let id, let tool, let elapsed, let ok):
-            return .toolInvocationCompleted(runID: id, tool: scrub(tool), elapsed: elapsed, succeeded: ok)
-        case .toolPolicyDenied(let id, let tool, let reason):
-            return .toolPolicyDenied(runID: id, tool: scrub(tool), reason: scrub(reason))
-        case .toolArgumentRejected(let id, let tool, let diag):
-            return .toolArgumentRejected(runID: id, tool: scrub(tool), diagnostic: redact(diag))
-        case .toolOutputRejected(let id, let tool, let diag):
-            return .toolOutputRejected(runID: id, tool: scrub(tool), diagnostic: redact(diag))
-        case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
-            return .verifierEvaluated(runID: id, verifier: scrub(v), cost: cost, verdict: redact(verdict), elapsed: elapsed)
-        case .repairScheduled(let id, let attempt, let diag):
-            return .repairScheduled(runID: id, attempt: attempt, diagnostic: redact(diag))
-        case .budgetExhausted:
-            return event
-        case .escalation(let id, let reason):
-            return .escalation(runID: id, reason: scrub(reason))
-        case .info(let id, let category, let message):
-            return .info(runID: id, category: scrub(category), message: scrub(message))
-        case .unknown(let id, let label, let payload):
-            var out: [String: String] = [:]
-            out.reserveCapacity(payload.count)
-            for (k, v) in payload { out[k] = scrub(v) }
-            return .unknown(runID: id, label: label, payload: out)
+    /// Returns `event` with every free-form string scrubbed by the
+    /// redactor chain, or the fail-closed placeholder if the round-trip
+    /// through the wire format does not survive.
+    func redact(_ event: TraceEvent) -> TraceEvent {
+        guard !redactors.isEmpty else { return event }
+        do {
+            let encoded = try JSONEncoder().encode(event)
+            let tree = try JSONSerialization.jsonObject(with: encoded, options: [])
+            let scrubbed = scrub(tree, freeForm: false)
+            let reencoded = try JSONSerialization.data(withJSONObject: scrubbed, options: [])
+            return try JSONDecoder().decode(TraceEvent.self, from: reencoded)
+        } catch {
+            return .unknown(runID: event.runID, label: TraceEvent.redactionFailedLabel, payload: [:])
         }
     }
 
-    private func redact(_ verdict: Verdict) -> Verdict {
-        switch verdict {
-        case .pass: return .pass
-        case .repair(let d): return .repair(redact(d))
-        case .reject(let d): return .reject(redact(d))
-        case .escalate(let d): return .escalate(redact(d))
+    private func scrub(_ value: Any, freeForm: Bool) -> Any {
+        switch value {
+        case let object as [String: Any]:
+            var out: [String: Any] = [:]
+            out.reserveCapacity(object.count)
+            for (key, member) in object {
+                if !freeForm, TraceCoding.preservedValueKeys.contains(key) {
+                    out[key] = member
+                    continue
+                }
+                // Structural keys are schema, not content: rewriting them
+                // would make the event undecodable. Free-form keys (and
+                // every key inside a caller-supplied payload) are content.
+                let scrubbedKey = !freeForm && TraceCoding.structuralKeys.contains(key) ? key : scrub(string: key)
+                let nested = freeForm || TraceCoding.freeFormContainerKeys.contains(key)
+                out[scrubbedKey] = scrub(member, freeForm: nested)
+            }
+            return out
+        case let array as [Any]:
+            return array.map { scrub($0, freeForm: freeForm) }
+        case let text as String:
+            return scrub(string: text)
+        default:
+            return value
         }
     }
 
-    private func redact(_ d: Diagnostic) -> Diagnostic {
-        Diagnostic(
-            verifier: scrub(d.verifier),
-            message: scrub(d.message),
-            suggestion: d.suggestion.map(scrub),
-            location: d.location
-        )
+    private func scrub(string: String) -> String {
+        redactors.reduce(string) { accumulated, redactor in redactor.redact(accumulated) }
     }
 }

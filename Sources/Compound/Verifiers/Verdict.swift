@@ -4,7 +4,7 @@ import Foundation
 /// the pattern's vocabulary: `pass` (move on), `repair` (retry with
 /// diagnostic), `reject` (give up cleanly), `escalate` (defer to a human).
 /// The control loop reacts to each.
-public enum Verdict: Sendable, Equatable {
+public enum Verdict: Sendable, Equatable, Codable {
     /// Verification succeeded.
     case pass
     /// Verification failed but is worth retrying with the supplied
@@ -48,11 +48,67 @@ extension Verdict {
     }
 }
 
+// MARK: - Codable
+
+extension Verdict {
+    /// Wire keys for the hand-written ``Codable`` conformance. The
+    /// synthesized enum conformance would nest payloads under `_0`; a
+    /// stable `type` discriminator plus a named `diagnostic` keeps the
+    /// JSONL trace format readable, greppable, and safe to walk
+    /// structurally (see ``RedactingTracer``).
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case type
+        case diagnostic
+    }
+
+    /// Stable discriminator string for this verdict's case.
+    var wireType: String {
+        switch self {
+        case .pass: return "pass"
+        case .repair: return "repair"
+        case .reject: return "reject"
+        case .escalate: return "escalate"
+        }
+    }
+
+    /// Encodes as `{"type": "...", "diagnostic": {...}}`; `pass` carries
+    /// no diagnostic.
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(wireType, forKey: .type)
+        if let diagnostic {
+            try container.encode(diagnostic, forKey: .diagnostic)
+        }
+    }
+
+    /// Decodes the `type`/`diagnostic` pair written by ``encode(to:)``.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "pass":
+            self = .pass
+        case "repair":
+            self = .repair(try container.decode(Diagnostic.self, forKey: .diagnostic))
+        case "reject":
+            self = .reject(try container.decode(Diagnostic.self, forKey: .diagnostic))
+        case "escalate":
+            self = .escalate(try container.decode(Diagnostic.self, forKey: .diagnostic))
+        default:
+            throw DecodingError.dataCorruptedError(
+                forKey: .type,
+                in: container,
+                debugDescription: "unknown verdict type \"\(type)\""
+            )
+        }
+    }
+}
+
 /// Structured failure description carried by ``Verdict/repair(_:)``,
 /// ``Verdict/reject(_:)``, and ``Verdict/escalate(_:)``. Pairs a
 /// verifier-identified message with an optional repair suggestion and
 /// source location so consumers can render actionable diagnostics.
-public struct Diagnostic: Sendable, Equatable, Hashable {
+public struct Diagnostic: Sendable, Equatable, Hashable, Codable {
     /// Name of the originating verifier.
     public let verifier: String
     /// What went wrong.
@@ -99,9 +155,21 @@ public struct Diagnostic: Sendable, Equatable, Hashable {
     }
 }
 
+extension Diagnostic {
+    /// Wire keys for the synthesized ``Codable`` conformance, spelled out
+    /// so the trace layer can enumerate every structural key it must not
+    /// rewrite while redacting (see ``RedactingTracer``).
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case verifier
+        case message
+        case suggestion
+        case location
+    }
+}
+
 /// Half-open `[start, end)` byte/character offset range used by
 /// ``Diagnostic`` to point at a span of input.
-public struct SourceRange: Sendable, Equatable, Hashable {
+public struct SourceRange: Sendable, Equatable, Hashable, Codable {
     /// Inclusive start offset.
     public let start: Int
     /// Exclusive end offset.
@@ -113,11 +181,20 @@ public struct SourceRange: Sendable, Equatable, Hashable {
     }
 }
 
+extension SourceRange {
+    /// Wire keys for the synthesized ``Codable`` conformance; enumerated
+    /// for the same reason as ``Diagnostic/CodingKeys``.
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case start
+        case end
+    }
+}
+
 /// Cost hint used by ``VerifierChain`` to order verifiers cheapest-first.
 /// Numeric values are deliberate — chains sort ascending. The names mirror
 /// the ladder in the pattern doc: parse, schema, types, lint, unit,
 /// integration, proof, human.
-public enum VerifierCost: Int, Sendable, Comparable {
+public enum VerifierCost: Int, Sendable, Comparable, Codable {
     /// Free or near-free structural checks (encoding, parse-ability).
     case parse = 0
     /// Schema/shape conformance.
