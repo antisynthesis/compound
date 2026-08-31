@@ -35,6 +35,10 @@ public struct SignpostTracer: Tracer {
             signposter.emitEvent("tool.end", id: signposter.makeSignpostID(), "run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public) ok=\(ok) ms=\(Self.ms(elapsed))")
         case .toolPolicyDenied(let id, let tool, _):
             signposter.emitEvent("tool.denied", id: signposter.makeSignpostID(), "run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public)")
+        case .toolArgumentRejected(let id, let tool, _):
+            signposter.emitEvent("tool.argrej", id: signposter.makeSignpostID(), "run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public)")
+        case .toolOutputRejected(let id, let tool, _):
+            signposter.emitEvent("tool.outrej", id: signposter.makeSignpostID(), "run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public)")
         case .verifierEvaluated(let id, let v, _, _, let elapsed):
             signposter.emitEvent("verifier", id: signposter.makeSignpostID(), "run=\(id.uuidString, privacy: .public) v=\(v, privacy: .public) ms=\(Self.ms(elapsed))")
         case .repairScheduled(let id, let attempt, _):

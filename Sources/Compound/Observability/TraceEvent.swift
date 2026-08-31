@@ -35,6 +35,12 @@ public enum TraceEvent: Sendable {
     case toolInvocationCompleted(runID: UUID, tool: String, elapsed: Duration, succeeded: Bool)
     /// A tool invocation was blocked by ``Policy``.
     case toolPolicyDenied(runID: UUID, tool: String, reason: String)
+    /// A tool invocation's decoded arguments were rejected by the tool's
+    /// argument verifier chain before the tool executed.
+    case toolArgumentRejected(runID: UUID, tool: String, diagnostic: Diagnostic)
+    /// A tool's returned output was rejected by the tool's output
+    /// verifier chain and withheld from the model's context.
+    case toolOutputRejected(runID: UUID, tool: String, diagnostic: Diagnostic)
 
     /// A verifier produced a verdict.
     case verifierEvaluated(runID: UUID, verifier: String, cost: VerifierCost, verdict: Verdict, elapsed: Duration)
@@ -65,6 +71,8 @@ public enum TraceEvent: Sendable {
              .toolInvocationRequested(let id, _),
              .toolInvocationCompleted(let id, _, _, _),
              .toolPolicyDenied(let id, _, _),
+             .toolArgumentRejected(let id, _, _),
+             .toolOutputRejected(let id, _, _),
              .verifierEvaluated(let id, _, _, _, _),
              .repairScheduled(let id, _, _),
              .budgetExhausted(let id, _),
@@ -86,6 +94,8 @@ public enum TraceEvent: Sendable {
         case .toolInvocationRequested: return "tool.requested"
         case .toolInvocationCompleted: return "tool.completed"
         case .toolPolicyDenied: return "tool.denied"
+        case .toolArgumentRejected: return "tool.argument.rejected"
+        case .toolOutputRejected: return "tool.output.rejected"
         case .verifierEvaluated: return "verifier.evaluated"
         case .repairScheduled: return "repair.scheduled"
         case .budgetExhausted: return "budget.exhausted"
@@ -112,6 +122,8 @@ public protocol TraceEventVisitor: Sendable {
     func visitToolInvocationRequested(runID: UUID, tool: String) async
     func visitToolInvocationCompleted(runID: UUID, tool: String, elapsed: Duration, succeeded: Bool) async
     func visitToolPolicyDenied(runID: UUID, tool: String, reason: String) async
+    func visitToolArgumentRejected(runID: UUID, tool: String, diagnostic: Diagnostic) async
+    func visitToolOutputRejected(runID: UUID, tool: String, diagnostic: Diagnostic) async
     func visitVerifierEvaluated(runID: UUID, verifier: String, cost: VerifierCost, verdict: Verdict, elapsed: Duration) async
     func visitRepairScheduled(runID: UUID, attempt: Int, diagnostic: Diagnostic) async
     func visitBudgetExhausted(runID: UUID, kind: BudgetExhaustion) async
@@ -129,6 +141,8 @@ public extension TraceEventVisitor {
     func visitToolInvocationRequested(runID _: UUID, tool _: String) async {}
     func visitToolInvocationCompleted(runID _: UUID, tool _: String, elapsed _: Duration, succeeded _: Bool) async {}
     func visitToolPolicyDenied(runID _: UUID, tool _: String, reason _: String) async {}
+    func visitToolArgumentRejected(runID _: UUID, tool _: String, diagnostic _: Diagnostic) async {}
+    func visitToolOutputRejected(runID _: UUID, tool _: String, diagnostic _: Diagnostic) async {}
     func visitVerifierEvaluated(runID _: UUID, verifier _: String, cost _: VerifierCost, verdict _: Verdict, elapsed _: Duration) async {}
     func visitRepairScheduled(runID _: UUID, attempt _: Int, diagnostic _: Diagnostic) async {}
     func visitBudgetExhausted(runID _: UUID, kind _: BudgetExhaustion) async {}
@@ -157,6 +171,10 @@ public extension TraceEvent {
             await visitor.visitToolInvocationCompleted(runID: id, tool: tool, elapsed: elapsed, succeeded: ok)
         case .toolPolicyDenied(let id, let tool, let reason):
             await visitor.visitToolPolicyDenied(runID: id, tool: tool, reason: reason)
+        case .toolArgumentRejected(let id, let tool, let diag):
+            await visitor.visitToolArgumentRejected(runID: id, tool: tool, diagnostic: diag)
+        case .toolOutputRejected(let id, let tool, let diag):
+            await visitor.visitToolOutputRejected(runID: id, tool: tool, diagnostic: diag)
         case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
             await visitor.visitVerifierEvaluated(runID: id, verifier: v, cost: cost, verdict: verdict, elapsed: elapsed)
         case .repairScheduled(let id, let attempt, let diag):

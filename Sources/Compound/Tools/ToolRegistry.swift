@@ -15,25 +15,32 @@ public protocol ToolRegistration: Sendable {
 }
 
 /// Concrete ``ToolRegistration`` for a single `FoundationModels.Tool`.
-/// Owns the per-tool argument verifier chain so the wrapped tool's
-/// arguments are always gated before execution.
-public struct GenericToolRegistration<Wrapped: Tool>: ToolRegistration where Wrapped.Arguments: Sendable {
+/// Owns the per-tool argument and output verifier chains so the wrapped
+/// tool's arguments are always gated before execution and its output is
+/// always gated before re-entering the model's context.
+public struct GenericToolRegistration<Wrapped: Tool>: ToolRegistration
+where Wrapped.Arguments: Sendable, Wrapped.Output: Sendable {
     /// Underlying tool.
     public let wrapped: Wrapped
     /// Scopes required to invoke the tool.
     public let requiredScopes: Set<String>
     /// Argument-side verifiers (in any order; sorted by cost in the chain).
     public let argumentVerifiers: [AnyVerifier<Wrapped.Arguments>]
+    /// Output-side verifiers run against the tool's result before it is
+    /// returned to the model (in any order; sorted by cost in the chain).
+    public let outputVerifiers: [AnyVerifier<Wrapped.Output>]
 
     /// Creates a registration.
     public init(
         _ wrapped: Wrapped,
         requiredScopes: Set<String> = [],
-        argumentVerifiers: [AnyVerifier<Wrapped.Arguments>] = []
+        argumentVerifiers: [AnyVerifier<Wrapped.Arguments>] = [],
+        outputVerifiers: [AnyVerifier<Wrapped.Output>] = []
     ) {
         self.wrapped = wrapped
         self.requiredScopes = requiredScopes
         self.argumentVerifiers = argumentVerifiers
+        self.outputVerifiers = outputVerifiers
     }
 
     /// Inherited tool name.
@@ -47,6 +54,10 @@ public struct GenericToolRegistration<Wrapped: Tool>: ToolRegistration where Wra
                 name: "\(wrapped.name)-args",
                 argumentVerifiers
             ),
+            outputVerifiers: VerifierChain(
+                name: "\(wrapped.name)-output",
+                outputVerifiers
+            ),
             requiredScopes: requiredScopes,
             runContext: runContext,
             policy: policy
@@ -55,13 +66,17 @@ public struct GenericToolRegistration<Wrapped: Tool>: ToolRegistration where Wra
 }
 
 /// Collects tools alongside the deterministic metadata the model never
-/// sees (required scopes, argument verifiers) and instantiates per-run
-/// ``VerifiedTool`` wrappers bound to the live ``RunContext``.
+/// sees (required scopes, argument and output verifiers) and instantiates
+/// per-run ``VerifiedTool`` wrappers bound to the live ``RunContext``.
+///
+/// Tool names must be unique: ``register(_:requiredScopes:argumentVerifiers:outputVerifiers:)``
+/// throws ``CompoundError/toolAlreadyRegistered(name:)`` on a duplicate
+/// name rather than silently shadowing an earlier registration.
 ///
 /// # Example
 /// ```swift
 /// var registry = ToolRegistry()
-/// registry.register(
+/// try registry.register(
 ///     CalculatorTool(),
 ///     requiredScopes: ["compute.read"],
 ///     argumentVerifiers: [CalculatorBoundsVerifier().erased()]
@@ -72,25 +87,44 @@ public struct ToolRegistry: Sendable {
     /// Registered tools in insertion order.
     public private(set) var registrations: [any ToolRegistration]
 
-    /// Creates a registry seeded with `registrations`.
+    /// Creates a registry seeded with `registrations`. The seed is taken
+    /// as-is; callers assembling the seed by hand are responsible for
+    /// name uniqueness (``register(_:)`` enforces it from then on).
     public init(_ registrations: [any ToolRegistration] = []) {
         self.registrations = registrations
     }
 
-    /// Registers a tool with optional scope requirements and argument
-    /// verifiers.
+    /// Registers a tool with optional scope requirements and argument /
+    /// output verifiers.
+    ///
+    /// - Throws: ``CompoundError/toolAlreadyRegistered(name:)`` when a
+    ///   registration with the same tool name already exists.
     public mutating func register<Wrapped: Tool>(
         _ tool: Wrapped,
         requiredScopes: Set<String> = [],
-        argumentVerifiers: [AnyVerifier<Wrapped.Arguments>] = []
-    ) where Wrapped.Arguments: Sendable {
-        registrations.append(
+        argumentVerifiers: [AnyVerifier<Wrapped.Arguments>] = [],
+        outputVerifiers: [AnyVerifier<Wrapped.Output>] = []
+    ) throws where Wrapped.Arguments: Sendable, Wrapped.Output: Sendable {
+        try register(
             GenericToolRegistration(
                 tool,
                 requiredScopes: requiredScopes,
-                argumentVerifiers: argumentVerifiers
+                argumentVerifiers: argumentVerifiers,
+                outputVerifiers: outputVerifiers
             )
         )
+    }
+
+    /// Registers a pre-built ``ToolRegistration`` (e.g.
+    /// ``KVStoreToolRegistration``).
+    ///
+    /// - Throws: ``CompoundError/toolAlreadyRegistered(name:)`` when a
+    ///   registration with the same tool name already exists.
+    public mutating func register(_ registration: any ToolRegistration) throws {
+        guard !registrations.contains(where: { $0.name == registration.name }) else {
+            throw CompoundError.toolAlreadyRegistered(name: registration.name)
+        }
+        registrations.append(registration)
     }
 
     /// Instantiates every registered tool against `runContext`/`policy`.

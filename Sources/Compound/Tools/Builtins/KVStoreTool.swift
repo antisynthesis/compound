@@ -149,23 +149,23 @@ public struct KVStoreTool: Tool {
     public func call(arguments: Arguments) async throws -> String {
         switch arguments.op {
         case "get":
-            guard let key = arguments.key else { return "error: 'key' is required for get" }
+            guard let key = arguments.key else { return ToolResult.inBandError("'key' is required for get") }
             let v = try await backend.get(key, principal: principal)
             return v ?? "not-found"
         case "set":
-            guard let key = arguments.key else { return "error: 'key' is required for set" }
-            guard let value = arguments.value else { return "error: 'value' is required for set" }
+            guard let key = arguments.key else { return ToolResult.inBandError("'key' is required for set") }
+            guard let value = arguments.value else { return ToolResult.inBandError("'value' is required for set") }
             try await backend.set(key, value: value, principal: principal)
             return "ok"
         case "delete":
-            guard let key = arguments.key else { return "error: 'key' is required for delete" }
+            guard let key = arguments.key else { return ToolResult.inBandError("'key' is required for delete") }
             try await backend.delete(key, principal: principal)
             return "ok"
         case "list":
             let ks = try await backend.keys(principal: principal)
             return ks.joined(separator: "\n")
         default:
-            return "error: unknown op '\(arguments.op)' (expected get / set / delete / list)"
+            return ToolResult.inBandError("unknown op '\(arguments.op)' (expected get / set / delete / list)")
         }
     }
 }
@@ -181,16 +181,21 @@ public struct KVStoreToolRegistration: ToolRegistration {
     public let requiredScopes: Set<String>
     /// Argument verifiers run before the tool executes.
     public let argumentVerifiers: [AnyVerifier<KVStoreTool.Arguments>]
+    /// Output verifiers run against the tool's result before it is
+    /// returned to the model.
+    public let outputVerifiers: [AnyVerifier<String>]
 
     /// Creates a registration.
     public init(
         _ tool: KVStoreTool,
         requiredScopes: Set<String> = [],
-        argumentVerifiers: [AnyVerifier<KVStoreTool.Arguments>] = []
+        argumentVerifiers: [AnyVerifier<KVStoreTool.Arguments>] = [],
+        outputVerifiers: [AnyVerifier<String>] = []
     ) {
         self.tool = tool
         self.requiredScopes = requiredScopes
         self.argumentVerifiers = argumentVerifiers
+        self.outputVerifiers = outputVerifiers
     }
 
     /// Inherited tool name.
@@ -205,6 +210,10 @@ public struct KVStoreToolRegistration: ToolRegistration {
             argumentVerifiers: VerifierChain(
                 name: "\(tool.name)-args",
                 argumentVerifiers
+            ),
+            outputVerifiers: VerifierChain(
+                name: "\(tool.name)-output",
+                outputVerifiers
             ),
             requiredScopes: requiredScopes,
             runContext: runContext,

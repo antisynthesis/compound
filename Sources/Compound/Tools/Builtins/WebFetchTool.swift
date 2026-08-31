@@ -91,6 +91,9 @@ public struct WebFetchTool: Tool {
     public let blockedHosts: Set<String>
     /// Resolver consulted to defeat DNS rebinding.
     public let resolver: HostResolver
+    /// Maximum number of HTTP redirects to follow. Every hop is re-gated
+    /// against the full SSRF policy; exceeding this cap aborts the fetch.
+    public let maxRedirects: Int
 
     /// Creates a tool with the supplied gating policy.
     public init(
@@ -99,7 +102,8 @@ public struct WebFetchTool: Tool {
         maxBytes: Int = 256 * 1024,
         allowedSchemes: Set<String> = ["https"],
         blockedHosts: Set<String> = URLSafetyVerifier.defaultBlockedHosts,
-        resolver: HostResolver = SystemHostResolver()
+        resolver: HostResolver = SystemHostResolver(),
+        maxRedirects: Int = 5
     ) {
         self.session = session
         self.timeout = timeout
@@ -107,6 +111,7 @@ public struct WebFetchTool: Tool {
         self.allowedSchemes = allowedSchemes
         self.blockedHosts = blockedHosts
         self.resolver = resolver
+        self.maxRedirects = maxRedirects
         let schema = DynamicGenerationSchema(
             name: "WebFetchArguments",
             description: "Arguments for the web_fetch tool",
@@ -136,61 +141,46 @@ public struct WebFetchTool: Tool {
     /// address. Errors are returned in-band as `"error: ..."` strings;
     /// cancellation is re-thrown.
     public func call(arguments: Arguments) async throws -> String {
-        guard let url = URL(string: arguments.url),
-              let scheme = url.scheme?.lowercased(),
-              let rawHost = url.host(percentEncoded: false) else {
-            return "error: invalid URL"
+        guard let url = URL(string: arguments.url) else {
+            return ToolResult.inBandError("invalid URL")
         }
-        var host = rawHost.lowercased()
-        if host.hasSuffix(".") { host.removeLast() }
-        guard host.allSatisfy({ $0.isASCII }) else {
-            return "error: host contains non-ASCII characters"
-        }
-        if !allowedSchemes.contains(scheme) {
-            return "error: scheme '\(scheme)' not allowed"
-        }
-        if blockedHosts.contains(host) {
-            return "error: host '\(host)' is blocked"
-        }
-        if URLSafetyVerifier.looksLikeNonCanonicalIPLiteral(host) {
-            return "error: host '\(host)' is a non-canonical IP literal"
-        }
-        if URLSafetyVerifier.isPrivateNetworkHost(host) {
-            return "error: host '\(host)' is on a private network"
-        }
-
-        // Defeat DNS rebinding: resolve the hostname now and reject if any
-        // returned address is on the SSRF blocklist. Literal IPs short-circuit
-        // because resolution would just echo the input.
-        let resolved: [String]
-        if URLSafetyVerifier.parseIPv4(host) != nil || URLSafetyVerifier.parseIPv6(host) != nil {
-            resolved = [host]
-        } else {
-            do {
-                resolved = try await resolver.resolve(host)
-            } catch {
-                if error is CancellationError { throw error }
-                return "error: DNS resolution failed for '\(host)'"
-            }
-        }
-        if resolved.isEmpty {
-            return "error: DNS resolution returned no addresses for '\(host)'"
-        }
-        for ip in resolved {
-            let normalized = ip.split(separator: "%").first.map(String.init) ?? ip  // strip zone id
-            if URLSafetyVerifier.isPrivateNetworkHost(normalized) {
-                return "error: host '\(host)' resolves to private address '\(normalized)'"
-            }
+        // Gate the initial URL against the full SSRF policy.
+        if let reason = try await gate(url) {
+            return ToolResult.inBandError("\(reason)")
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = timeout
         request.setValue("text/plain, text/html, application/json", forHTTPHeaderField: "Accept")
+
+        // Re-run the same gate on every redirect hop. URLSession follows
+        // redirects with its default policy *after* the initial gate, so
+        // without this a vetted host could 302 to 169.254.169.254 (cloud
+        // metadata) or any private address and the tool would happily
+        // fetch it. The delegate re-evaluates scheme/host/resolver per hop
+        // and caps the number of hops.
+        let redirectGuard = RedirectGuard(maxRedirects: maxRedirects) { [self] hopURL in
+            try await self.gate(hopURL)
+        }
+        // Install the guard as a session-level delegate so it reliably
+        // receives `willPerformHTTPRedirection` on every hop. The wrapper
+        // session inherits the injected session's configuration (protocol
+        // classes, timeouts, cookie policy, ...) and is torn down when the
+        // fetch completes.
+        let guardedSession = URLSession(
+            configuration: session.configuration,
+            delegate: redirectGuard,
+            delegateQueue: nil
+        )
+        defer { guardedSession.finishTasksAndInvalidate() }
         do {
-            let (byteStream, response) = try await session.bytes(for: request)
+            let (byteStream, response) = try await guardedSession.bytes(for: request)
+            if let reason = redirectGuard.blockReason {
+                return ToolResult.inBandError("\(reason)")
+            }
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                return "error: HTTP \(http.statusCode)"
+                return ToolResult.inBandError("HTTP \(http.statusCode)")
             }
             var buffer = Data()
             buffer.reserveCapacity(min(maxBytes, 64 * 1024))
@@ -209,11 +199,77 @@ public struct WebFetchTool: Tool {
                 // a half-encoded code point.
                 buffer = truncatedToUTF8Boundary(buffer)
             }
-            return String(data: buffer, encoding: .utf8) ?? "error: response was not valid UTF-8"
+            return String(data: buffer, encoding: .utf8) ?? ToolResult.inBandError("response was not valid UTF-8")
         } catch {
             if error is CancellationError { throw error }
-            return "error: \(error.localizedDescription)"
+            return ToolResult.inBandError("\(error.localizedDescription)")
         }
+    }
+
+    /// Evaluates one URL (the initial request or a redirect target)
+    /// against the full SSRF policy: scheme allow-list, host block-list,
+    /// non-canonical IP-literal rejection, private-network rejection, and
+    /// a DNS resolution check that rejects any address resolving onto the
+    /// blocklist (defeating DNS rebinding).
+    ///
+    /// Returns `nil` when the URL is safe to fetch, or a human-readable
+    /// reason string when it must be blocked. Re-throws `CancellationError`
+    /// so cooperative cancellation still propagates.
+    ///
+    /// - Note: This is a resolve-then-connect check, so a classic DNS
+    ///   TOCTOU window remains: a resolver could return a public address
+    ///   here and a private one when `URLSession` actually connects.
+    ///   Fully closing it requires pinning the connection to the vetted
+    ///   address (a custom `URLProtocol` or socket-level control), which
+    ///   is out of scope for this tool; the per-hop re-gate narrows but
+    ///   does not eliminate the window.
+    func gate(_ url: URL) async throws -> String? {
+        guard let scheme = url.scheme?.lowercased(),
+              let rawHost = url.host(percentEncoded: false) else {
+            return "invalid URL"
+        }
+        var host = rawHost.lowercased()
+        if host.hasSuffix(".") { host.removeLast() }
+        guard host.allSatisfy({ $0.isASCII }) else {
+            return "host contains non-ASCII characters"
+        }
+        if !allowedSchemes.contains(scheme) {
+            return "scheme '\(scheme)' not allowed"
+        }
+        if blockedHosts.contains(host) {
+            return "host '\(host)' is blocked"
+        }
+        if URLSafetyVerifier.looksLikeNonCanonicalIPLiteral(host) {
+            return "host '\(host)' is a non-canonical IP literal"
+        }
+        if URLSafetyVerifier.isPrivateNetworkHost(host) {
+            return "host '\(host)' is on a private network"
+        }
+
+        // Defeat DNS rebinding: resolve the hostname now and reject if any
+        // returned address is on the SSRF blocklist. Literal IPs short-circuit
+        // because resolution would just echo the input.
+        let resolved: [String]
+        if URLSafetyVerifier.parseIPv4(host) != nil || URLSafetyVerifier.parseIPv6(host) != nil {
+            resolved = [host]
+        } else {
+            do {
+                resolved = try await resolver.resolve(host)
+            } catch {
+                if error is CancellationError { throw error }
+                return "DNS resolution failed for '\(host)'"
+            }
+        }
+        if resolved.isEmpty {
+            return "DNS resolution returned no addresses for '\(host)'"
+        }
+        for ip in resolved {
+            let normalized = ip.split(separator: "%").first.map(String.init) ?? ip  // strip zone id
+            if URLSafetyVerifier.isPrivateNetworkHost(normalized) {
+                return "host '\(host)' resolves to private address '\(normalized)'"
+            }
+        }
+        return nil
     }
 
     /// Drop a trailing incomplete UTF-8 code point if the buffer was cut
@@ -244,5 +300,78 @@ public struct WebFetchTool: Tool {
             d.removeLast(trailingContinuations + 1)
         }
         return d
+    }
+}
+
+/// Per-task `URLSession` delegate that re-gates every HTTP redirect hop
+/// against the same SSRF policy the initial request passed, and caps the
+/// number of hops. Returning `nil` from the redirect callback cancels the
+/// redirect; the block reason is recorded for the caller to surface.
+///
+/// `@unchecked Sendable`: mutable state (`hops`, `_blockReason`) is guarded
+/// by an `NSLock`, and the injected `gate` closure is `@Sendable`.
+final class RedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let gate: @Sendable (URL) async throws -> String?
+    private let maxRedirects: Int
+    private let lock = NSLock()
+    private var hops = 0
+    private var _blockReason: String?
+
+    init(maxRedirects: Int, gate: @escaping @Sendable (URL) async throws -> String?) {
+        self.maxRedirects = maxRedirects
+        self.gate = gate
+    }
+
+    /// Reason the fetch was blocked mid-flight, if any.
+    var blockReason: String? {
+        lock.lock(); defer { lock.unlock() }
+        return _blockReason
+    }
+
+    private func record(_ reason: String) {
+        lock.lock(); defer { lock.unlock() }
+        if _blockReason == nil { _blockReason = reason }
+    }
+
+    // Non-async so it can touch the NSLock (whose lock/unlock are
+    // unavailable from async contexts); returns the incremented hop count.
+    private func nextHop() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        hops += 1
+        return hops
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        let hop = nextHop()
+        if hop > maxRedirects {
+            record("too many redirects (> \(maxRedirects))")
+            completionHandler(nil)
+            return
+        }
+        guard let url = request.url else {
+            record("redirect to an invalid URL")
+            completionHandler(nil)
+            return
+        }
+        Task { [self] in
+            do {
+                if let reason = try await gate(url) {
+                    record("redirect blocked: \(reason)")
+                    completionHandler(nil)
+                } else {
+                    completionHandler(request)
+                }
+            } catch {
+                // Cancellation or any gate fault: refuse to follow the hop.
+                record("redirect gate failed")
+                completionHandler(nil)
+            }
+        }
     }
 }

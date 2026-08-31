@@ -42,6 +42,10 @@ public actor MetricsCollectingTracer: Tracer {
             snapshot.perTool[name] = stat
         case .toolPolicyDenied:
             snapshot.toolPolicyDenied += 1
+        case .toolArgumentRejected:
+            snapshot.toolArgumentRejections += 1
+        case .toolOutputRejected:
+            snapshot.toolOutputRejections += 1
 
         case .verifierEvaluated(_, let name, _, let verdict, let elapsed):
             var stat = snapshot.perVerifier[name] ?? .init()
@@ -110,6 +114,12 @@ public struct MetricsSnapshot: Sendable {
     public var toolFailures: Int = 0
     /// Number of tool invocations denied by ``Policy``.
     public var toolPolicyDenied: Int = 0
+    /// Number of tool invocations whose arguments were rejected by an
+    /// argument verifier chain (the tool never executed).
+    public var toolArgumentRejections: Int = 0
+    /// Number of tool invocations whose output was rejected by an output
+    /// verifier chain and withheld from the model.
+    public var toolOutputRejections: Int = 0
     /// Per-tool breakdown keyed by tool name.
     public var perTool: [String: ToolStats] = [:]
 

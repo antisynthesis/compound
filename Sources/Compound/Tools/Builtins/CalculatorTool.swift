@@ -59,20 +59,20 @@ public struct CalculatorTool: Tool {
     public func call(arguments: Arguments) async throws -> String {
         let trimmed = arguments.expression.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            return "error: expression is empty"
+            return ToolResult.inBandError("expression is empty")
         }
         if trimmed.count > Self.maxExpressionLength {
-            return "error: expression exceeds \(Self.maxExpressionLength) characters"
+            return ToolResult.inBandError("expression exceeds \(Self.maxExpressionLength) characters")
         }
         // Reject `NSExpression`'s power operator outright. The allowed-char
         // filter below would catch `**` via the second `*`, but checking
         // explicitly keeps the error message accurate.
         if trimmed.contains("**") {
-            return "error: '**' is not supported"
+            return ToolResult.inBandError("'**' is not supported")
         }
         let allowed = Set("0123456789+-*/.() \t")
         guard trimmed.allSatisfy({ allowed.contains($0) }) else {
-            return "error: expression contains disallowed characters"
+            return ToolResult.inBandError("expression contains disallowed characters")
         }
         // Walk the string once to bound parenthesis depth.
         var depth = 0
@@ -84,15 +84,15 @@ public struct CalculatorTool: Tool {
             } else if c == ")" {
                 depth -= 1
                 if depth < 0 {
-                    return "error: unbalanced parentheses"
+                    return ToolResult.inBandError("unbalanced parentheses")
                 }
             }
         }
         if depth != 0 {
-            return "error: unbalanced parentheses"
+            return ToolResult.inBandError("unbalanced parentheses")
         }
         if maxDepth > Self.maxParenDepth {
-            return "error: parenthesis nesting exceeds \(Self.maxParenDepth)"
+            return ToolResult.inBandError("parenthesis nesting exceeds \(Self.maxParenDepth)")
         }
         let expression = NSExpression(format: trimmed)
         let result = expression.expressionValue(with: nil, context: nil)
@@ -104,6 +104,6 @@ public struct CalculatorTool: Tool {
             }
             return String(asDouble)
         }
-        return "error: could not evaluate expression"
+        return ToolResult.inBandError("could not evaluate expression")
     }
 }

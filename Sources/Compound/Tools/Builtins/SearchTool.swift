@@ -81,7 +81,7 @@ public struct SearchTool: Tool {
         do {
             results = try await retriever.retrieve(query: arguments.query, limit: limit)
         } catch {
-            return "error: retrieval failed: \(error.localizedDescription)"
+            return ToolResult.inBandError("retrieval failed: \(error.localizedDescription)")
         }
         if results.isEmpty {
             return "no results"

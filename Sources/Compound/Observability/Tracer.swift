@@ -141,6 +141,10 @@ public struct OSLogTracer: Tracer {
             logger.debug("tool.completed run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public) ok=\(ok, privacy: .public) ms=\(Self.ms(elapsed), privacy: .public)")
         case .toolPolicyDenied(let id, let tool, let reason):
             logger.notice("tool.denied run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public) reason=\(reason, privacy: .public)")
+        case .toolArgumentRejected(let id, let tool, let diag):
+            logger.notice("tool.argument.rejected run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public) why=\(diag.summary, privacy: .public)")
+        case .toolOutputRejected(let id, let tool, let diag):
+            logger.notice("tool.output.rejected run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public) why=\(diag.summary, privacy: .public)")
         case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
             logger.debug("verifier.evaluated run=\(id.uuidString, privacy: .public) v=\(v, privacy: .public) cost=\(cost.rawValue, privacy: .public) verdict=\(Self.label(verdict), privacy: .public) ms=\(Self.ms(elapsed), privacy: .public)")
         case .repairScheduled(let id, let attempt, let diag):
@@ -189,6 +193,18 @@ public struct OSLogTracer: Tracer {
             } else {
                 logger.notice("tool.denied run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .private) reason=\(reason, privacy: .private)")
             }
+        case .toolArgumentRejected(let id, let tool, let diag):
+            if toolNamesArePublic {
+                logger.notice("tool.argument.rejected run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public) why=\(diag.summary, privacy: .private)")
+            } else {
+                logger.notice("tool.argument.rejected run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .private) why=\(diag.summary, privacy: .private)")
+            }
+        case .toolOutputRejected(let id, let tool, let diag):
+            if toolNamesArePublic {
+                logger.notice("tool.output.rejected run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .public) why=\(diag.summary, privacy: .private)")
+            } else {
+                logger.notice("tool.output.rejected run=\(id.uuidString, privacy: .public) tool=\(tool, privacy: .private) why=\(diag.summary, privacy: .private)")
+            }
         case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
             logger.debug("verifier.evaluated run=\(id.uuidString, privacy: .public) v=\(v, privacy: .public) cost=\(cost.rawValue, privacy: .public) verdict=\(Self.label(verdict), privacy: .public) ms=\(Self.ms(elapsed), privacy: .public)")
         case .repairScheduled(let id, let attempt, let diag):
@@ -223,6 +239,10 @@ public struct OSLogTracer: Tracer {
             logger.debug("tool.completed run=\(id.uuidString, privacy: .private) tool=\(tool, privacy: .private) ok=\(ok, privacy: .private) ms=\(Self.ms(elapsed), privacy: .private)")
         case .toolPolicyDenied(let id, let tool, let reason):
             logger.notice("tool.denied run=\(id.uuidString, privacy: .private) tool=\(tool, privacy: .private) reason=\(reason, privacy: .private)")
+        case .toolArgumentRejected(let id, let tool, let diag):
+            logger.notice("tool.argument.rejected run=\(id.uuidString, privacy: .private) tool=\(tool, privacy: .private) why=\(diag.summary, privacy: .private)")
+        case .toolOutputRejected(let id, let tool, let diag):
+            logger.notice("tool.output.rejected run=\(id.uuidString, privacy: .private) tool=\(tool, privacy: .private) why=\(diag.summary, privacy: .private)")
         case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
             logger.debug("verifier.evaluated run=\(id.uuidString, privacy: .private) v=\(v, privacy: .private) cost=\(cost.rawValue, privacy: .private) verdict=\(Self.label(verdict), privacy: .private) ms=\(Self.ms(elapsed), privacy: .private)")
         case .repairScheduled(let id, let attempt, let diag):
@@ -370,6 +390,10 @@ private struct JSONLRecord: Encodable {
             return ["tool": tool, "ok": String(ok), "elapsed_ms": String(JSONLRecord.ms(elapsed))]
         case .toolPolicyDenied(_, let tool, let reason):
             return ["tool": tool, "reason": reason]
+        case .toolArgumentRejected(_, let tool, let diag):
+            return ["tool": tool, "why": diag.summary]
+        case .toolOutputRejected(_, let tool, let diag):
+            return ["tool": tool, "why": diag.summary]
         case .verifierEvaluated(_, let v, let cost, let verdict, let elapsed):
             return ["verifier": v, "cost": String(cost.rawValue), "verdict": JSONLRecord.verdictLabel(verdict), "elapsed_ms": String(JSONLRecord.ms(elapsed))]
         case .repairScheduled(_, let attempt, let diag):

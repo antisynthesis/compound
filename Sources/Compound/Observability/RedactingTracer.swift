@@ -47,6 +47,10 @@ public struct RedactingTracer: Tracer {
             return .toolInvocationCompleted(runID: id, tool: scrub(tool), elapsed: elapsed, succeeded: ok)
         case .toolPolicyDenied(let id, let tool, let reason):
             return .toolPolicyDenied(runID: id, tool: scrub(tool), reason: scrub(reason))
+        case .toolArgumentRejected(let id, let tool, let diag):
+            return .toolArgumentRejected(runID: id, tool: scrub(tool), diagnostic: redact(diag))
+        case .toolOutputRejected(let id, let tool, let diag):
+            return .toolOutputRejected(runID: id, tool: scrub(tool), diagnostic: redact(diag))
         case .verifierEvaluated(let id, let v, let cost, let verdict, let elapsed):
             return .verifierEvaluated(runID: id, verifier: scrub(v), cost: cost, verdict: redact(verdict), elapsed: elapsed)
         case .repairScheduled(let id, let attempt, let diag):
