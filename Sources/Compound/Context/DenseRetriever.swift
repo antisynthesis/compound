@@ -64,6 +64,9 @@ public actor DenseRetriever: Retriever {
         let unit: [Double]
     }
     private var indexed: [IndexedChunk] = []
+    /// chunk id -> position in `indexed`, so upsert and remove are O(1)
+    /// lookups rather than a linear scan.
+    private var positions: [String: Int] = [:]
     private var dimension: Int?
     private let provider: any EmbeddingProvider
     private let minScore: Double
@@ -84,9 +87,9 @@ public actor DenseRetriever: Retriever {
         self.indexingConcurrency = indexingConcurrency
     }
 
-    /// Embeds and indexes `chunks` with bounded concurrency. Zero-norm
-    /// vectors are silently skipped; one degenerate input does not fail
-    /// the batch.
+    /// Embeds and indexes `chunks` with bounded concurrency, each with
+    /// the upsert semantics of the single-chunk overload. Zero-norm vectors are
+    /// silently skipped; one degenerate input does not fail the batch.
     public func index(_ chunks: [DocumentChunk]) async throws {
         guard !chunks.isEmpty else { return }
         let provider = self.provider
@@ -122,11 +125,45 @@ public actor DenseRetriever: Retriever {
         }
     }
 
-    /// Embeds and indexes a single chunk.
+    /// Embeds and indexes a single chunk, replacing any previously
+    /// indexed chunk with the same ``DocumentChunk/id``. Mirrors
+    /// ``BM25Retriever/index(_:)-3l3qj`` so a hybrid setup stays in sync
+    /// when one side re-indexes.
     public func index(_ chunk: DocumentChunk) async throws {
         let vec = try await provider.embed(chunk.content)
         try appendEmbedding(chunk: chunk, vec: vec)
     }
+
+    /// Removes the chunk with `id` from the index.
+    ///
+    /// - Returns: `true` if a chunk was removed, `false` if `id` was not
+    ///   indexed.
+    @discardableResult
+    public func remove(id: String) -> Bool {
+        guard let i = positions.removeValue(forKey: id) else { return false }
+        indexed.remove(at: i)
+        // Everything after the hole shifted down by one.
+        for j in i..<indexed.count { positions[indexed[j].chunk.id] = j }
+        return true
+    }
+
+    /// Removes several chunks. Returns the number actually removed.
+    @discardableResult
+    public func remove(ids: [String]) -> Int {
+        ids.reduce(0) { $0 + (remove(id: $1) ? 1 : 0) }
+    }
+
+    /// Empties the index. The recorded vector dimension is cleared too,
+    /// so the next indexed chunk re-establishes it — an emptied index is
+    /// indistinguishable from a fresh one.
+    public func removeAll() {
+        indexed.removeAll()
+        positions.removeAll()
+        dimension = nil
+    }
+
+    /// Whether a chunk with `id` is currently indexed.
+    public func contains(id: String) -> Bool { positions[id] != nil }
 
     private func appendEmbedding(chunk: DocumentChunk, vec: [Double]) throws {
         if let d = dimension {
@@ -141,15 +178,29 @@ public actor DenseRetriever: Retriever {
             // A zero vector contributes nothing to cosine similarity; storing
             // it would just be dead weight. Skip silently — the embedding
             // provider produced an unusable vector, but failing the entire
-            // batch over one degenerate input is too aggressive.
+            // batch over one degenerate input is too aggressive. Any prior
+            // version of this chunk still goes away: the caller asked for
+            // the id to reflect this content, and this content is
+            // unretrievable.
+            remove(id: chunk.id)
             return
         }
         let unit = vec.map { $0 / norm }
-        indexed.append(IndexedChunk(chunk: chunk, unit: unit))
+        let entry = IndexedChunk(chunk: chunk, unit: unit)
+        if let i = positions[chunk.id] {
+            indexed[i] = entry
+        } else {
+            positions[chunk.id] = indexed.count
+            indexed.append(entry)
+        }
     }
 
     /// Embeds `query` and returns the top-`limit` indexed chunks by
     /// cosine similarity, filtered by ``minScore``.
+    ///
+    /// Equal scores break by chunk id ascending — exactly duplicated or
+    /// collinear vectors are common in practice, and ``HybridRetriever``
+    /// fuses by rank, so the ordering must not depend on insertion order.
     public func retrieve(query: String, limit: Int) async throws -> [RetrievedSource] {
         guard !indexed.isEmpty else { return [] }
         let qVec = try await provider.embed(query)
@@ -172,7 +223,10 @@ public actor DenseRetriever: Retriever {
             for i in 0..<u.count { dot += qUnit[i] * u[i] }
             if dot >= minScore { scored.append((entry, dot)) }
         }
-        scored.sort { $0.1 > $1.1 }
+        scored.sort { a, b in
+            if a.1 != b.1 { return a.1 > b.1 }
+            return a.0.chunk.id < b.0.chunk.id
+        }
         return scored.prefix(limit).map {
             RetrievedSource(
                 id: $0.0.chunk.id,

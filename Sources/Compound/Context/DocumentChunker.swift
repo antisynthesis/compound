@@ -1,9 +1,12 @@
 import Foundation
+import CryptoKit
 
 /// One retrievable chunk of a source document, produced by
 /// ``DocumentChunker``.
 public struct DocumentChunk: Sendable, Equatable, Hashable, Identifiable {
-    /// Stable per-chunk identifier.
+    /// Stable per-chunk identifier. Unless supplied explicitly this is
+    /// derived deterministically from `documentID`, `ordinal`, and
+    /// `content` — see ``DocumentChunker/chunkID(documentID:ordinal:content:)``.
     public let id: String
     /// Identifier of the source document.
     public let documentID: String
@@ -14,9 +17,16 @@ public struct DocumentChunk: Sendable, Equatable, Hashable, Identifiable {
     /// Free-form per-chunk metadata propagated to retrievers.
     public let metadata: [String: String]
 
-    /// Creates a chunk. `id` defaults to a fresh UUID string.
-    public init(id: String = UUID().uuidString, documentID: String, ordinal: Int, content: String, metadata: [String: String] = [:]) {
-        self.id = id
+    /// Creates a chunk.
+    ///
+    /// - Parameter id: Explicit identifier. When `nil` (the default) the
+    ///   id is derived from `documentID`, `ordinal`, and `content` via
+    ///   ``DocumentChunker/chunkID(documentID:ordinal:content:)``, so
+    ///   re-chunking the same document always yields the same ids. Pass
+    ///   an explicit value only when an external system owns the id
+    ///   space.
+    public init(id: String? = nil, documentID: String, ordinal: Int, content: String, metadata: [String: String] = [:]) {
+        self.id = id ?? DocumentChunker.chunkID(documentID: documentID, ordinal: ordinal, content: content)
         self.documentID = documentID
         self.ordinal = ordinal
         self.content = content
@@ -31,6 +41,46 @@ public struct DocumentChunk: Sendable, Equatable, Hashable, Identifiable {
 /// ``paragraphs(text:documentID:softMaxChars:metadata:)`` (paragraph-
 /// aligned).
 public enum DocumentChunker {
+    /// Domain-separation tag mixed into every derived chunk id. Bump the
+    /// suffix if the derivation ever changes so stored ground truth can
+    /// detect the mismatch instead of silently mis-joining.
+    public static let chunkIDDomain = "compound.chunk.v1"
+
+    /// Derives the deterministic identifier for a chunk.
+    ///
+    /// The id is the first 16 bytes of
+    /// `SHA256(domain ‖ documentID ‖ ordinal ‖ content)`, rendered as 32
+    /// lowercase hex characters. Every component is length-prefixed with
+    /// its big-endian `UInt64` byte count so no two distinct triples can
+    /// produce the same pre-image (a plain concatenation would let
+    /// `("ab", 0, "c")` and `("a", 0, "bc")` collide).
+    ///
+    /// `documentID` and `content` are NFC-normalized first, matching the
+    /// normalization ``BM25Retriever/defaultTokenize`` applies, so the
+    /// same text delivered in NFD and NFC forms lands on one id.
+    ///
+    /// Metadata is deliberately *not* part of the derivation: the id
+    /// names a position in a document's content, not the annotations a
+    /// pipeline hangs off it. Re-chunking with different metadata is an
+    /// update to the same chunk, and retrievers treat it as one.
+    ///
+    /// This is the derivation eval ground truth should use to name
+    /// expected chunks — it is stable across processes, machines, and
+    /// runs.
+    public static func chunkID(documentID: String, ordinal: Int, content: String) -> String {
+        var hasher = SHA256()
+        func absorb(_ bytes: [UInt8]) {
+            var length = UInt64(bytes.count).bigEndian
+            withUnsafeBytes(of: &length) { hasher.update(bufferPointer: $0) }
+            bytes.withUnsafeBytes { hasher.update(bufferPointer: $0) }
+        }
+        absorb(Array(chunkIDDomain.utf8))
+        absorb(Array(documentID.precomposedStringWithCanonicalMapping.utf8))
+        absorb(Array(String(ordinal).utf8))
+        absorb(Array(content.precomposedStringWithCanonicalMapping.utf8))
+        return hasher.finalize().prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// Splits `text` into fixed-size grapheme-cluster windows with
     /// `overlap` characters of context between successive chunks.
     ///
