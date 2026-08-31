@@ -41,14 +41,18 @@ public struct ConversationContextAssembler: ContextAssembler {
     public let retriever: any Retriever
     /// Maximum number of sources to request per turn.
     public let retrievalLimit: Int
-    /// Redactors applied to the user prompt.
+    /// Redactors applied, in order, to every input in ``redactionScope``.
     public let redactors: [any Redactor]
+    /// Which inputs the redactor chain runs over.
+    public let redactionScope: RedactionScope
     /// Policy gate consulted for the redacted prompt.
     public let policy: any Policy
     /// Summarizer for the earlier-than-recent slice.
     public let summarizer: any ConversationSummarizer
     /// Number of most-recent messages to include verbatim.
     public let keepRecent: Int
+    /// Frame used to render the final prompt.
+    public let framing: any PromptFraming
 
     /// Creates an assembler.
     public init(
@@ -57,32 +61,34 @@ public struct ConversationContextAssembler: ContextAssembler {
         retriever: any Retriever = EmptyRetriever(),
         retrievalLimit: Int = 5,
         redactors: [any Redactor] = [],
+        redactionScope: RedactionScope = .all,
         policy: any Policy = AllowAll(),
         summarizer: any ConversationSummarizer = TruncatingSummarizer(),
-        keepRecent: Int = 12
+        keepRecent: Int = 12,
+        framing: any PromptFraming = PromptFrame()
     ) {
         self.baseInstructions = baseInstructions
         self.store = store
         self.retriever = retriever
         self.retrievalLimit = retrievalLimit
         self.redactors = redactors
+        self.redactionScope = redactionScope
         self.policy = policy
         self.summarizer = summarizer
         self.keepRecent = keepRecent
+        self.framing = framing
     }
 
     /// Redacts the user prompt, evaluates policy, summarizes the older
-    /// slice of conversation history, and composes a transcript-aware
-    /// prompt.
+    /// slice of conversation history (redacting stored messages before
+    /// they reach the summarizer when history is in scope), and returns
+    /// a context whose ``AssembledContext/transcript`` carries the
+    /// structured history for the frame to fence at render time.
     public func assemble(userPrompt: String, runContext: RunContext) async throws -> AssembledContext {
-        var working = userPrompt
         var applied: [String] = []
-        for r in redactors {
-            let next = r.redact(working)
-            if next != working {
-                applied.append(r.name)
-                working = next
-            }
+        var working = userPrompt
+        if redactionScope.contains(.userPrompt) {
+            working = runRedactors(redactors, on: working, applied: &applied)
         }
 
         let decision = await policy.evaluate(
@@ -94,50 +100,49 @@ public struct ConversationContextAssembler: ContextAssembler {
         }
 
         let history = try await store.messages()
-        let recent = Array(history.suffix(keepRecent))
-        let earlier = Array(history.dropLast(recent.count))
-        let summary = try await summarizer.summarize(earlier)
+        var recent = Array(history.suffix(keepRecent))
+        var earlier = Array(history.dropLast(recent.count))
+        if redactionScope.contains(.history) {
+            recent = recent.map { redacted($0, applied: &applied) }
+            earlier = earlier.map { redacted($0, applied: &applied) }
+        }
+        var summary = try await summarizer.summarize(earlier)
+        if redactionScope.contains(.history) {
+            // Defense in depth: the summarizer saw redacted input, but a
+            // model-backed summarizer could still emit secret-shaped text.
+            summary = runRedactors(redactors, on: summary, applied: &applied)
+        }
 
-        let sources = try await retriever.retrieve(query: working, limit: retrievalLimit)
+        var sources = try await retriever.retrieve(query: working, limit: retrievalLimit)
+        if redactionScope.contains(.retrievedSources) {
+            sources = sources.map { s in
+                RetrievedSource(
+                    id: s.id,
+                    title: runRedactors(redactors, on: s.title, applied: &applied),
+                    content: runRedactors(redactors, on: s.content, applied: &applied),
+                    score: s.score
+                )
+            }
+        }
 
-        let transcriptBlock = Self.renderTranscript(summary: summary, recent: recent)
-
-        let assembled = AssembledContext(
+        return AssembledContext(
             instructions: baseInstructions,
             userPrompt: working,
             sources: sources,
-            redactionsApplied: applied
-        )
-        // Render the final prompt as: sources + transcript + new user message.
-        // We override renderedPrompt by carrying the transcript in metadata-like
-        // form via a custom struct.
-        return AssembledContext(
-            instructions: baseInstructions,
-            userPrompt: Self.compose(transcriptBlock: transcriptBlock, userPrompt: working),
-            sources: assembled.sources,
-            redactionsApplied: assembled.redactionsApplied
+            redactionsApplied: applied,
+            transcript: PromptTranscript(summary: summary, messages: recent),
+            framing: framing
         )
     }
 
-    private static func renderTranscript(summary: String, recent: [ConversationMessage]) -> String {
-        if summary.isEmpty && recent.isEmpty { return "" }
-        var out = "Conversation so far:\n"
-        if !summary.isEmpty { out += summary }
-        for m in recent {
-            let role: String
-            switch m.role {
-            case .user: role = "User"
-            case .assistant: role = "Assistant"
-            case .system: role = "System"
-            case .tool: role = "Tool(\(m.metadata["tool"] ?? "unknown"))"
-            }
-            out += "\(role): \(m.content)\n"
-        }
-        return out + "\n"
-    }
-
-    private static func compose(transcriptBlock: String, userPrompt: String) -> String {
-        if transcriptBlock.isEmpty { return userPrompt }
-        return transcriptBlock + "New user message: " + userPrompt
+    /// Returns `message` with its content run through the redactor chain.
+    private func redacted(_ message: ConversationMessage, applied: inout [String]) -> ConversationMessage {
+        ConversationMessage(
+            id: message.id,
+            role: message.role,
+            content: runRedactors(redactors, on: message.content, applied: &applied),
+            createdAt: message.createdAt,
+            metadata: message.metadata
+        )
     }
 }

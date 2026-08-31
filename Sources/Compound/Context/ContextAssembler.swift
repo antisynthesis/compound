@@ -53,8 +53,9 @@ public struct StaticRetriever: Retriever {
 }
 
 /// Result of running a ``ContextAssembler``. Bundles the instructions,
-/// the (possibly redacted) user prompt, retrieved evidence, and a list
-/// of redactor names that fired so callers can attribute scrubbing.
+/// the (possibly redacted) user prompt, retrieved evidence, prior
+/// conversation, and a list of redactor names that fired so callers can
+/// attribute scrubbing.
 public struct AssembledContext: Sendable {
     /// System instructions for the model.
     public var instructions: String
@@ -64,13 +65,26 @@ public struct AssembledContext: Sendable {
     public var sources: [RetrievedSource]
     /// Names of every ``Redactor`` whose output differed from its input.
     public var redactionsApplied: [String]
+    /// Prior conversation to render ahead of the user prompt, if any.
+    public var transcript: PromptTranscript?
+    /// Frame that renders this context into the final prompt string.
+    public var framing: any PromptFraming
 
     /// Creates an assembled context.
-    public init(instructions: String, userPrompt: String, sources: [RetrievedSource], redactionsApplied: [String]) {
+    public init(
+        instructions: String,
+        userPrompt: String,
+        sources: [RetrievedSource],
+        redactionsApplied: [String],
+        transcript: PromptTranscript? = nil,
+        framing: any PromptFraming = PromptFrame()
+    ) {
         self.instructions = instructions
         self.userPrompt = userPrompt
         self.sources = sources
         self.redactionsApplied = redactionsApplied
+        self.transcript = transcript
+        self.framing = framing
     }
 
     /// Set of every source identifier in ``sources``. Useful when wiring
@@ -79,19 +93,13 @@ public struct AssembledContext: Sendable {
         Set(sources.map(\.id))
     }
 
-    /// Produces the final string passed to the model. When ``sources`` is
-    /// non-empty, prepends a "Sources:" block and instructs the model to
-    /// annotate factual claims with the source identifier.
+    /// Produces the final string passed to the model by delegating to
+    /// ``framing``. The default ``PromptFrame`` fences sources and
+    /// transcript messages so their content cannot parse as prompt
+    /// structure, and instructs the model to cite source identifiers
+    /// when sources are present.
     public func renderedPrompt() -> String {
-        if sources.isEmpty { return userPrompt }
-        var out = "Sources:\n"
-        for s in sources {
-            out += "- [\(s.id)] \(s.title)\n  \(s.content)\n"
-        }
-        out += "\n"
-        out += "User question: \(userPrompt)\n"
-        out += "Annotate every factual claim with a [source-id] taken from the list above."
-        return out
+        framing.render(sources: sources, transcript: transcript, userPrompt: userPrompt)
     }
 }
 
@@ -103,9 +111,11 @@ public protocol ContextAssembler: Sendable {
     func assemble(userPrompt: String, runContext: RunContext) async throws -> AssembledContext
 }
 
-/// Default assembler. Runs the supplied ``Redactor`` chain over the user
-/// prompt, asks the policy whether the resulting content is admissible,
-/// and retrieves grounding sources via the configured ``Retriever``.
+/// Default assembler. Runs the supplied ``Redactor`` chain over every
+/// input admitted by ``redactionScope`` (user prompt and retrieved
+/// sources by default), asks the policy whether the resulting content is
+/// admissible, and retrieves grounding sources via the configured
+/// ``Retriever``.
 public struct DefaultContextAssembler: ContextAssembler {
     /// Static system instructions for the model.
     public let baseInstructions: String
@@ -113,10 +123,14 @@ public struct DefaultContextAssembler: ContextAssembler {
     public let retriever: any Retriever
     /// Maximum number of sources to request.
     public let retrievalLimit: Int
-    /// Redactors applied to the user prompt in order.
+    /// Redactors applied, in order, to every input in ``redactionScope``.
     public let redactors: [any Redactor]
+    /// Which inputs the redactor chain runs over.
+    public let redactionScope: RedactionScope
     /// Policy gate that may reject the redacted prompt.
     public let policy: any Policy
+    /// Frame used to render the final prompt.
+    public let framing: any PromptFraming
 
     /// Creates a default assembler.
     public init(
@@ -124,30 +138,31 @@ public struct DefaultContextAssembler: ContextAssembler {
         retriever: any Retriever = EmptyRetriever(),
         retrievalLimit: Int = 5,
         redactors: [any Redactor] = [],
-        policy: any Policy = AllowAll()
+        redactionScope: RedactionScope = .all,
+        policy: any Policy = AllowAll(),
+        framing: any PromptFraming = PromptFrame()
     ) {
         self.baseInstructions = baseInstructions
         self.retriever = retriever
         self.retrievalLimit = retrievalLimit
         self.redactors = redactors
+        self.redactionScope = redactionScope
         self.policy = policy
+        self.framing = framing
     }
 
-    /// Redacts, evaluates policy, retrieves sources, and returns the
-    /// assembled context.
+    /// Redacts, evaluates policy, retrieves sources (redacting their
+    /// titles and bodies when in scope), and returns the assembled
+    /// context.
     ///
     /// - Throws: ``CompoundError/policyDenied(reason:)`` if the policy
     ///   denies the redacted prompt, or any error thrown by the
     ///   retriever.
     public func assemble(userPrompt: String, runContext: RunContext) async throws -> AssembledContext {
-        var working = userPrompt
         var applied: [String] = []
-        for r in redactors {
-            let next = r.redact(working)
-            if next != working {
-                applied.append(r.name)
-                working = next
-            }
+        var working = userPrompt
+        if redactionScope.contains(.userPrompt) {
+            working = runRedactors(redactors, on: working, applied: &applied)
         }
 
         let decision = await policy.evaluate(
@@ -158,13 +173,25 @@ public struct DefaultContextAssembler: ContextAssembler {
             throw CompoundError.policyDenied(reason: reason)
         }
 
-        let sources = try await retriever.retrieve(query: working, limit: retrievalLimit)
+        var sources = try await retriever.retrieve(query: working, limit: retrievalLimit)
+        if redactionScope.contains(.retrievedSources) {
+            sources = sources.map { s in
+                RetrievedSource(
+                    id: s.id,
+                    title: runRedactors(redactors, on: s.title, applied: &applied),
+                    content: runRedactors(redactors, on: s.content, applied: &applied),
+                    score: s.score
+                )
+            }
+        }
 
         return AssembledContext(
             instructions: baseInstructions,
             userPrompt: working,
             sources: sources,
-            redactionsApplied: applied
+            redactionsApplied: applied,
+            transcript: nil,
+            framing: framing
         )
     }
 }
