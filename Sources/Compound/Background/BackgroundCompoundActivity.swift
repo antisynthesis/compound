@@ -4,6 +4,38 @@ import Foundation
 import BackgroundTasks
 #endif
 
+/// Terminal outcome of one background activity run.
+///
+/// Mirrors `NSBackgroundActivityScheduler.Result` so the macOS scheduler
+/// path is a direct translation, and doubles as the iOS-family
+/// `setTaskCompleted(success:)` value (`.finished` is success).
+public enum BackgroundActivityCompletion: String, Sendable, Equatable {
+    /// The body ran to completion without cancellation.
+    case finished
+    /// The body threw, was cancelled, or the scheduler asked the activity
+    /// to wind down. The scheduler should retry later.
+    case deferred
+}
+
+/// Minimal seam over a scheduler's "please wind down" signal.
+///
+/// `NSBackgroundActivityScheduler.shouldDefer` is the only supported way to
+/// learn that macOS wants the activity's slot back, and it is a poll — there
+/// is no callback. Reading it through this protocol keeps the deferral and
+/// cancellation contract testable off-device with a fake.
+public protocol BackgroundDeferralSource: Sendable {
+    /// `true` once the scheduler has asked the activity to stop, or once the
+    /// scheduler is no longer alive to ask.
+    var shouldDefer: Bool { get }
+}
+
+/// A deferral source that never asks the activity to wind down. Used when a
+/// run has no scheduler behind it (`runNow`, tests, manual invocation).
+public struct NullDeferralSource: BackgroundDeferralSource {
+    public init() {}
+    public var shouldDefer: Bool { false }
+}
+
 /// A compound run packaged for the platform's background scheduler.
 ///
 /// On iOS-family platforms (iOS, iPadOS, tvOS, visionOS) this wraps Apple's
@@ -12,10 +44,12 @@ import BackgroundTasks
 /// from anywhere in your app. On macOS this wraps
 /// `NSBackgroundActivityScheduler` via ``scheduleAsBackgroundActivity(interval:repeats:tolerance:qualityOfService:)``.
 ///
-/// The activity owns the cancellation contract: when the system signals
-/// expiration, the in-flight `Task` is cancelled, the compound loop's
-/// cooperative cancellation kicks in, and `setTaskCompleted(success:)` is
-/// reported with the appropriate outcome via a single completion path.
+/// The activity owns the cancellation contract on both platforms: when the
+/// system signals expiration (iOS) or asks the activity to defer (macOS),
+/// the in-flight `Task` is cancelled, the compound loop's cooperative
+/// cancellation kicks in, and the outcome is reported exactly once via a
+/// single completion path. ``run(deferral:pollInterval:)`` is the shared
+/// core both scheduler paths funnel through.
 public struct BackgroundCompoundActivity: Sendable {
     /// The reverse-DNS identifier registered with the platform scheduler.
     /// Must match an entry in the app's `Info.plist`
@@ -63,6 +97,68 @@ public struct BackgroundCompoundActivity: Sendable {
         try await perform()
     }
 
+    /// Run the activity's body once and map the result onto a completion
+    /// outcome. Cancellation — thrown or observed cooperatively — and any
+    /// other error resolve to ``BackgroundActivityCompletion/deferred`` so
+    /// the scheduler retries the work later.
+    ///
+    /// This is the single result-mapping path both platform schedulers use.
+    public func runToCompletion() async -> BackgroundActivityCompletion {
+        do {
+            try await perform()
+            return Task.isCancelled ? .deferred : .finished
+        } catch {
+            return .deferred
+        }
+    }
+
+    /// Run the activity's body while honoring a scheduler's deferral signal.
+    ///
+    /// The body runs in its own `Task`, held so it can be cancelled. A poller
+    /// samples `deferral.shouldDefer` every `pollInterval`; the moment the
+    /// scheduler asks the activity to wind down — or the scheduler goes away
+    /// entirely — the work `Task` is cancelled. Cancellation of the *calling*
+    /// task is forwarded the same way. Because the control loop is
+    /// cancellation-correct, the in-flight `RunContext` observes the
+    /// cancellation and unwinds rather than running past its slot.
+    ///
+    /// A scheduler that is already deferring when the run starts short-circuits
+    /// to ``BackgroundActivityCompletion/deferred`` without invoking the body.
+    public func run(
+        deferral: some BackgroundDeferralSource,
+        pollInterval: Duration = .milliseconds(200)
+    ) async -> BackgroundActivityCompletion {
+        if deferral.shouldDefer { return .deferred }
+
+        let box = WorkBox()
+        let work = Task<BackgroundActivityCompletion, Never> {
+            await self.runToCompletion()
+        }
+        box.set { work.cancel() }
+
+        let poller = Task<Void, Never> {
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: pollInterval)
+                } catch {
+                    return  // poller cancelled: work already resolved
+                }
+                if deferral.shouldDefer {
+                    box.cancel()
+                    return
+                }
+            }
+        }
+
+        let outcome = await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            box.cancel()
+        }
+        poller.cancel()
+        return outcome
+    }
+
     #if canImport(BackgroundTasks) && (os(iOS) || os(tvOS) || os(visionOS))
     /// Register the activity with `BGTaskScheduler.shared`. Call once at
     /// app launch (typically from a SwiftUI `App` `init` or the App
@@ -94,18 +190,10 @@ public struct BackgroundCompoundActivity: Sendable {
             }
 
             let work = Task<Void, Never> {
-                let success: Bool
-                do {
-                    try await self.perform()
-                    success = !Task.isCancelled
-                } catch is CancellationError {
-                    success = false
-                } catch {
-                    success = false
-                }
-                completion.complete(success: success)
+                let outcome = await self.runToCompletion()
+                completion.complete(success: outcome == .finished)
             }
-            workBox.set(work)
+            workBox.set { work.cancel() }
         }
     }
 
@@ -144,37 +232,43 @@ public struct BackgroundCompoundActivity: Sendable {
     ///
     /// The scheduler reclaims the activity's slot if work runs beyond its
     /// allotted window — short tasks are budgeted around 30 seconds, but
-    /// the exact deadline depends on system power and thermal state.
-    /// Throws or cancellation resolve to `.deferred`, which asks the
-    /// scheduler to retry; clean completion resolves to `.finished`.
-    /// Completion is reported exactly once via the structured `await`
-    /// path below.
+    /// the exact deadline depends on system power and thermal state. It
+    /// announces this by flipping `shouldDefer`, which is a poll rather than
+    /// a callback, so the run samples it at cooperative checkpoints via
+    /// ``run(deferral:pollInterval:)`` and cancels the work `Task` as soon as
+    /// it goes true — the same contract the iOS expiration handler provides.
+    /// Invalidating the scheduler drops the last strong reference the block
+    /// holds, which the deferral source also reads as "wind down".
+    ///
+    /// Throws, cancellation, and deferral all resolve to `.deferred`, which
+    /// asks the scheduler to retry; clean completion resolves to `.finished`.
+    /// Completion is reported exactly once via the structured `await` path.
     @discardableResult
     public func scheduleAsBackgroundActivity(
         interval: TimeInterval,
         repeats: Bool = true,
         tolerance: TimeInterval = 60,
-        qualityOfService: QualityOfService = .background
+        qualityOfService: QualityOfService = .background,
+        deferralPollInterval: Duration = .milliseconds(200)
     ) -> NSBackgroundActivityScheduler {
         let scheduler = NSBackgroundActivityScheduler(identifier: identifier)
         scheduler.interval = interval
         scheduler.repeats = repeats
         scheduler.tolerance = tolerance
         scheduler.qualityOfService = qualityOfService
+        // The source holds the scheduler weakly: the scheduler retains this
+        // block, so a strong capture would be a cycle — and a deallocated
+        // scheduler is exactly the "activity was invalidated" case the
+        // source reports as deferring. Built outside the block so only the
+        // `Sendable` source, never the scheduler, is captured.
+        let deferral = SchedulerDeferralSource(scheduler: scheduler)
         scheduler.schedule { completion in
-            // The scheduler holds the activity slot until `completion` is
-            // invoked, so a single-path await is sufficient: any thrown
-            // error (including cooperative cancellation) maps to
-            // `.deferred` so the scheduler retries.
             Task {
-                do {
-                    try await self.perform()
-                    completion(.finished)
-                } catch is CancellationError {
-                    completion(.deferred)
-                } catch {
-                    completion(.deferred)
-                }
+                let outcome = await self.run(
+                    deferral: deferral,
+                    pollInterval: deferralPollInterval
+                )
+                completion(outcome == .finished ? .finished : .deferred)
             }
         }
         return scheduler
@@ -182,29 +276,57 @@ public struct BackgroundCompoundActivity: Sendable {
     #endif
 }
 
-#if canImport(BackgroundTasks) && (os(iOS) || os(tvOS) || os(visionOS))
-/// Holds the work `Task` so the expiration handler — installed before
-/// the task is spawned — can cancel it. The handler captures the box,
-/// not the task itself, breaking the ordering dependency.
+/// Holds the work `Task`'s cancel handle so a signal that arrives before —
+/// or independently of — the task's own scope can cancel it: the iOS
+/// expiration handler is installed before the task is spawned, and the macOS
+/// deferral poller lives beside it. Callers capture the box, not the task,
+/// which breaks the ordering dependency; a `cancel()` that lands before
+/// `set(_:)` is remembered and applied on registration.
 /// `@unchecked` because mutable state is guarded by `lock` (NSLock).
-private final class WorkBox: @unchecked Sendable {
+final class WorkBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var task: Task<Void, Never>?
+    private var cancelWork: (@Sendable () -> Void)?
+    private var cancelled = false
 
-    func set(_ task: Task<Void, Never>) {
+    func set(_ cancel: @escaping @Sendable () -> Void) {
         lock.lock()
-        self.task = task
+        if cancelled {
+            lock.unlock()
+            cancel()
+            return
+        }
+        cancelWork = cancel
         lock.unlock()
     }
 
     func cancel() {
         lock.lock()
-        let t = task
+        if cancelled {
+            lock.unlock()
+            return
+        }
+        cancelled = true
+        let cancelWork = self.cancelWork
+        self.cancelWork = nil
         lock.unlock()
-        t?.cancel()
+        cancelWork?()
     }
 }
 
+#if os(macOS)
+/// Reads deferral state from a live `NSBackgroundActivityScheduler`. Held
+/// weakly so the scheduler's own retain of the work block is not a cycle; a
+/// scheduler that has been deallocated (or invalidated and released) counts
+/// as deferring, which is the safe direction — the activity winds down.
+/// `@unchecked` because the reference is only ever read, never mutated.
+struct SchedulerDeferralSource: BackgroundDeferralSource, @unchecked Sendable {
+    weak var scheduler: NSBackgroundActivityScheduler?
+
+    var shouldDefer: Bool { scheduler?.shouldDefer ?? true }
+}
+#endif
+
+#if canImport(BackgroundTasks) && (os(iOS) || os(tvOS) || os(visionOS))
 /// Single-shot gate that guarantees `setTaskCompleted(success:)` runs
 /// exactly once regardless of which path (normal completion vs.
 /// expiration) reaches it first. Uses a plain lock because `BGTask`
